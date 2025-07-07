@@ -200,9 +200,10 @@ class WiiGameSeleniumDownloader:
 
 
     def download_game(self, game_url: str, game_title: str,
-                     game_id: Optional[str] = None, # Added game_id, optional
-                     progress_callback: Optional[Callable[..., None]] = None, # General signature
-                     stop_callback: Optional[Callable[[], bool]] = None) -> bool: # Added stop_callback
+                     game_id: Optional[str] = None,
+                     progress_callback: Optional[Callable[..., None]] = None,
+                     stop_callback: Optional[Callable[[], bool]] = None,
+                     total_size_bytes: Optional[int] = None) -> bool:
         """
         Загрузка игры
 
@@ -217,13 +218,12 @@ class WiiGameSeleniumDownloader:
         Returns:
             True если загрузка успешна, False иначе
         """
-        self.should_stop = False # Reset internal stop flag
+        self.should_stop = False  # Reset internal stop flag
         self.progress_callback = progress_callback
         self.external_stop_callback = stop_callback
 
-        # TODO: Need a way to get game_total_size_bytes, perhaps from game object if available via game_id
-        # For now, this will be None, and percentage calculation will be basic or omitted in monitor.
-        game_total_size_bytes = None
+        # Размер файла, если известен, используется для расчета процента
+        game_total_size_bytes = total_size_bytes
         logger.info(f"Запрос на загрузку игры: {game_title} (ID: {game_id}), URL: {game_url}")
 
         try:
@@ -366,7 +366,7 @@ if __name__ == '__main__':
     # threading.Timer(15, stop_event.set).start() # Stop after 15 seconds
 
     logger.info(f"Начало тестовой загрузки для: {test_game_title}")
-    success = downloader.download_game(test_game_url, test_game_title, test_game_id, sample_progress, stop_condition)
+    success = downloader.download_game(test_game_url, test_game_title, test_game_id, sample_progress, stop_condition, None)
 
     if success:
         logger.info(f"Тестовая загрузка '{test_game_title}' завершена успешно.")
