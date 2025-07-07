@@ -350,12 +350,12 @@ class DownloadQueue:
 
 class GameCard(QWidget):
     """Полная карточка игры с детальной информацией"""
-    
+
     def __init__(self, game: WiiGame, parent=None):
         super().__init__(parent)
         self.game = game
         self.setProperty("gameCard", True)
-        self.setFixedSize(420, 650)
+        self.setFixedSize(460, 700)
         self.setup_ui()
         self.load_game_details()
         
@@ -516,7 +516,7 @@ class GameCard(QWidget):
         box_layout = QVBoxLayout(box_group)
         self.box_image = QLabel()
         self.box_image.setAlignment(Qt.AlignCenter)
-        self.box_image.setFixedSize(140, 200)
+        self.box_image.setFixedSize(180, 250)
         self.box_image.setStyleSheet(f"""
             QLabel {{
                 border: 2px solid {WII_GRAY};
@@ -550,7 +550,7 @@ class GameCard(QWidget):
         disc_layout = QVBoxLayout(disc_group)
         self.disc_image = QLabel()
         self.disc_image.setAlignment(Qt.AlignCenter)
-        self.disc_image.setFixedSize(120, 120)
+        self.disc_image.setFixedSize(150, 150)
         self.disc_image.setStyleSheet(f"""
             QLabel {{
                 border: 2px solid {WII_GRAY};
@@ -630,6 +630,28 @@ class GameCard(QWidget):
         # Проверяем доступность URL
         if not self.game.detail_url:
             self.open_url_btn.setEnabled(False)
+
+    def update_game(self, game: WiiGame):
+        """Обновить карточку новыми данными"""
+        self.game = game
+        self.title_label.setText(game.title)
+        self.region_label.setText(game.region or "Не указано")
+        self.version_label.setText(game.version or "Не указано")
+        self.languages_label.setText(game.languages or "Не указано")
+        self.rating_label.setText(game.rating or "Не указано")
+        self.serial_label.setText(game.serial or "Не указано")
+        self.players_label.setText(game.players or "Не указано")
+        self.year_label.setText(game.year or "Не указано")
+        self.file_size_label.setText(game.file_size or "Не указано")
+
+        self.graphics_label.setText(game.graphics or "Не указано")
+        self.sound_label.setText(game.sound or "Не указано")
+        self.gameplay_label.setText(game.gameplay or "Не указано")
+        self.overall_label.setText(game.overall or "Не указано")
+        self.crc_label.setText(game.crc or "Не указано")
+        self.verified_label.setText(game.verified or "Не указано")
+
+        self.load_images()
         
     def load_images(self):
         """Загрузка изображений игры"""
@@ -1748,11 +1770,23 @@ class WiiUnifiedManager(QMainWindow):
         # Создаем новую карточку
         card = GameCard(game)
         card.download_btn.clicked.connect(lambda: self.download_game(game))
-        
+
         self.card_layout.addWidget(card)
-        
+
+        # Если информации мало, загружаем подробности в фоне
+        if not game.serial and game.detail_url:
+            self.status_label.setText("Загрузка информации об игре...")
+            self.details_thread = GameDetailsThread(self.parser, game.detail_url)
+            self.details_thread.details_loaded.connect(lambda g: self.on_details_loaded(g, card))
+            self.details_thread.start()
+
         # Проверяем, есть ли игра в скачанных
         self.check_game_status(game, card)
+
+    def on_details_loaded(self, details: WiiGame, card: GameCard):
+        """Обновить карточку после загрузки деталей"""
+        card.update_game(details)
+        self.status_label.setText("Информация загружена")
         
     def check_game_status(self, game: WiiGame, card: GameCard):
         """Проверить статус игры (скачана/установлена)"""
@@ -2701,22 +2735,11 @@ class WiiUnifiedManager(QMainWindow):
         """Обработка закрытия приложения"""
         # Сохраняем базу данных
         self.database.save_database()
-        
+
         # Останавливаем все потоки
         if hasattr(self, 'download_thread') and self.download_thread:
             self.download_thread.stop()
-            
-        event.accept()
-        
-    def closeEvent(self, event):
-        """Обработка закрытия приложения"""
-        # Сохраняем базу данных
-        self.database.save_database()
-        
-        # Останавливаем все потоки
-        if hasattr(self, 'download_thread') and self.download_thread:
-            self.download_thread.stop()
-            
+
         event.accept()
 
 # Потоки для асинхронных операций
@@ -2805,6 +2828,20 @@ class SearchThread(QThread):
             self.results_ready.emit(results)
         except Exception as e:
             self.error_occurred.emit(str(e))
+
+class GameDetailsThread(QThread):
+    """Поток для загрузки детальной информации об игре"""
+    details_loaded = Signal(object)
+
+    def __init__(self, parser: WiiGameParser, url: str):
+        super().__init__()
+        self.parser = parser
+        self.url = url
+
+    def run(self):
+        game = self.parser.parse_game_details_from_url(self.url)
+        if game:
+            self.details_loaded.emit(game)
 
 class DownloadThread(QThread):
     """Поток для загрузки игр с детальной информацией"""
