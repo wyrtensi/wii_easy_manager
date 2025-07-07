@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QMessageBox,
+    QComboBox, # Added QComboBox
 )
 # from PySide6.QtCore import QThread, Signal, QSize, QTimer # Moved up
 
