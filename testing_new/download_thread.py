@@ -17,7 +17,7 @@ from wii_game_parser import WiiGame
 class DownloadThread(QThread):
     """Поток для реальной загрузки игр с отслеживанием прогресса"""
     
-    progress_updated = Signal(int, int, float, str)  # downloaded, total, speed MB/s, eta
+    progress_updated = Signal(int, int, float, str, str)  # downloaded, total, speed MB/s, eta, size_str
     download_finished = Signal(bool, str)  # success, message
     
     def __init__(self, game: WiiGame):
@@ -33,9 +33,11 @@ class DownloadThread(QThread):
             # Импортируем загрузчик
             from wii_game_selenium_downloader import WiiGameSeleniumDownloader
             self.downloader = WiiGameSeleniumDownloader()
-            
+
+            total_size_bytes = self._parse_file_size(getattr(self.game, 'file_size', ''))
+
             self.start_time = time.time()
-            
+
             def progress_callback(downloaded: int, total: int):
                 """Callback для отслеживания прогресса"""
                 if self.should_stop:
@@ -57,7 +59,8 @@ class DownloadThread(QThread):
                     speed_mbs = 0
                     eta_str = "Вычисляется..."
                 
-                self.progress_updated.emit(downloaded, total, speed_mbs, eta_str)
+                size_str = f"{downloaded / (1024**3):.2f} / {total / (1024**3):.2f} ГБ" if total > 0 else f"{downloaded / (1024**3):.2f} ГБ"
+                self.progress_updated.emit(downloaded, total, speed_mbs, eta_str, size_str)
             
             # Проверяем, есть ли URL для скачивания
             if not hasattr(self.game, 'download_url') or not self.game.download_url:
@@ -83,7 +86,8 @@ class DownloadThread(QThread):
                 self.game.title,       # Название игры
                 game_id=getattr(self.game, 'id', None),  # ID игры
                 progress_callback=progress_callback,      # Callback для прогресса
-                stop_callback=lambda: self.should_stop   # Callback для остановки
+                stop_callback=lambda: self.should_stop,   # Callback для остановки
+                total_size_bytes=total_size_bytes         # Ожидаемый размер файла
             )
             
             if success:
@@ -131,25 +135,55 @@ class DownloadThread(QThread):
             game_title_clean = "".join(c for c in self.game.title if c.isalnum() or c in (' ', '-', '_')).strip()
             
             # Проверяем различные форматы файлов
-            for ext in ['.iso', '.wbfs', '.rvz', '.7z']:
+            for ext in ['.iso', '.wbfs', '.rvz']:
                 for file_path in downloads_dir.glob(f"*{game_title_clean}*{ext}"):
                     if file_path.exists():
                         print(f"Найден существующий файл: {file_path}")
                         return True
+            # Если найден архив, пытаемся распаковать
+            for file_path in downloads_dir.glob(f"*{game_title_clean}*.7z"):
+                if file_path.exists():
+                    print(f"Найден существующий архив: {file_path}")
+                    self._extract_existing_archive(file_path)
+                    return True
                         
             # Проверяем по ID игры, если есть
             if hasattr(self.game, 'id') and self.game.id:
-                for ext in ['.iso', '.wbfs', '.rvz', '.7z']:
+                for ext in ['.iso', '.wbfs', '.rvz']:
                     for file_path in downloads_dir.glob(f"*{self.game.id}*{ext}"):
                         if file_path.exists():
                             print(f"Найден существующий файл по ID: {file_path}")
                             return True
+                for file_path in downloads_dir.glob(f"*{self.game.id}*.7z"):
+                    if file_path.exists():
+                        print(f"Найден существующий архив по ID: {file_path}")
+                        self._extract_existing_archive(file_path)
+                        return True
                             
             return False
             
         except Exception as e:
             print(f"Ошибка проверки существующих файлов: {e}")
             return False
+
+    def _extract_existing_archive(self, archive_path):
+        """Распаковать существующий архив, если ещё не распакован"""
+        try:
+            from pathlib import Path
+            import py7zr
+
+            archive_path = Path(archive_path)
+            extract_dir = archive_path.parent / archive_path.stem
+            # Проверяем, есть ли уже распакованные файлы
+            if not extract_dir.exists() or not list(extract_dir.glob('*.iso')) and not list(extract_dir.glob('*.wbfs')) and not list(extract_dir.glob('*.rvz')):
+                extract_dir.mkdir(exist_ok=True)
+                with py7zr.SevenZipFile(archive_path, mode='r') as archive:
+                    archive.extractall(path=extract_dir)
+                print(f"Архив {archive_path} распакован в {extract_dir}")
+            else:
+                print(f"Архив {archive_path} уже распакован")
+        except Exception as e:
+            print(f"Ошибка распаковки существующего архива {archive_path}: {e}")
 
     def _extract_if_needed(self, downloaded_files) -> list:
         """Извлекает архивы, если необходимо"""
@@ -192,3 +226,23 @@ class DownloadThread(QThread):
             print(f"Ошибка распаковки архива: {e}")
             
         return extracted_files
+
+    def _parse_file_size(self, size_str: str) -> int:
+        """Преобразовать строку размера файла вида '4.3 GB' в байты"""
+        try:
+            if not size_str:
+                return 0
+            parts = size_str.replace(',', '').split()
+            if not parts:
+                return 0
+            value = float(parts[0])
+            unit = parts[1].lower() if len(parts) > 1 else ''
+            if unit.startswith('gb'):
+                return int(value * 1024 ** 3)
+            if unit.startswith('mb'):
+                return int(value * 1024 ** 2)
+            if unit.startswith('kb'):
+                return int(value * 1024)
+            return int(value)
+        except Exception:
+            return 0
