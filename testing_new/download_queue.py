@@ -42,7 +42,6 @@ from PySide6.QtWidgets import (
 
 from wum_style import build_style, WII_BLUE, WII_GRAY, WII_WHITE  # type: ignore
 from wii_game_parser import WiiGame, WiiGameParser  # type: ignore
-from download_queue import DownloadQueue  # type: ignore
 
 ###############################################################################
 # 🎴 GameCard                                                                #
