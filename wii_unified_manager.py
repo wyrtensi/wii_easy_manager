@@ -14,7 +14,7 @@ Wii Unified Manager 2.4
 from __future__ import annotations
 
 import sys
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 
 from PySide6.QtCore import (
@@ -658,8 +658,11 @@ class WiiUnifiedManager(QMainWindow):
 
         self._games: List[WiiGame] = []
         self._flash_games = []  # Список игр с флешки
+        self._downloaded_files = []  # type: List[Tuple[Path, bool]]
         self.current_drive = None  # Текущая выбранная флешка
         self._connect_signals()
+
+        self._load_downloaded_files()
         
         # Подключаем сигнал поиска
         self.search_completed.connect(self._populate_list)
@@ -746,6 +749,16 @@ class WiiUnifiedManager(QMainWindow):
         left_layout.addLayout(search_layout)
         
         # Games list
+        downloads_label = QLabel("⬇️ Скачанные игры:")
+        downloads_label.setStyleSheet("font-size:14pt;font-weight:bold;color:#5C6BC0;")
+        left_layout.addWidget(downloads_label)
+        self.list_downloaded_games = QListWidget()
+        self.list_downloaded_games.setMinimumWidth(300)
+        left_layout.addWidget(self.list_downloaded_games, 1)
+
+        flash_label = QLabel("💾 Игры на флешке:")
+        flash_label.setStyleSheet("font-size:14pt;font-weight:bold;color:#5C6BC0;")
+        left_layout.addWidget(flash_label)
         self.list_flash_games = QListWidget()
         self.list_flash_games.setMinimumWidth(300)
         left_layout.addWidget(self.list_flash_games, 1)
@@ -888,7 +901,8 @@ class WiiUnifiedManager(QMainWindow):
         btn._scale(1.0) # Ensure checked button is at normal scale
         self.stack.setCurrentWidget(page)
         if page == self.page_manager:
-            self._refresh_drives() # Refresh drives when switching to manager page
+            self._refresh_drives()
+            self._load_downloaded_files()
 
     # Методы для работы с флешкой
     def _refresh_drives(self):
@@ -936,12 +950,14 @@ class WiiUnifiedManager(QMainWindow):
             
             # Загружаем игры
             self._load_flash_games()
+            self._load_downloaded_files()
             self.status.showMessage(f"Выбрана флешка: {self.current_drive.name}")
         else:
             self.drive_info_label.setText("")
             self._flash_games.clear()
             self.list_flash_games.clear()
             self.flash_card.update_game(None)
+            self._load_downloaded_files()
 
     def _load_flash_games(self):
         """Загрузить игры с флешки"""
@@ -991,6 +1007,32 @@ class WiiUnifiedManager(QMainWindow):
         # Сбрасываем выбор карточки
         self.flash_card.update_game(None)
 
+    def _load_downloaded_files(self):
+        """Загрузить список скачанных файлов"""
+        downloads_dir = Path("downloads")
+        self.list_downloaded_games.clear()
+        self._downloaded_files.clear()
+
+        for file_path in downloads_dir.glob("*"):
+            if file_path.suffix.lower() not in [".iso", ".wbfs", ".rvz"]:
+                continue
+
+            game_id = self._extract_game_id(file_path)
+            installed = False
+            if self.current_drive and game_id:
+                pattern = f"*[{game_id}]*"
+                installed = any((self.current_drive.mount_point / "wbfs").glob(pattern))
+
+            emoji = "✅" if installed else "📥"
+            item = QListWidgetItem(f"{emoji} {file_path.name}")
+            self.list_downloaded_games.addItem(item)
+            self._downloaded_files.append((file_path, installed))
+
+    def _extract_game_id(self, path: Path) -> str:
+        import re
+        m = re.search(r"\[([A-Za-z0-9]{6})\]", path.stem)
+        return m.group(1).upper() if m else ""
+
     def _copy_files_to_flash(self, files_to_copy: List[str]):
         """Копировать файлы на флешку с использованием рабочего потока."""
         if not self.current_drive:
@@ -1033,6 +1075,7 @@ class WiiUnifiedManager(QMainWindow):
         self.status.showMessage("✅ Копирование успешно завершено!", 5000)
         self._set_manager_buttons_enabled(True)
         self._load_flash_games()  # Refresh the game list
+        self._load_downloaded_files()
 
     def _on_copy_error(self, error_message: str):
         """Обработка ошибки копирования."""
@@ -1073,10 +1116,21 @@ class WiiUnifiedManager(QMainWindow):
         if not self.current_drive:
             self.status.showMessage("Сначала выберите флешку")
             return
-            
-        # Здесь нужно найти скачанные игры
-        # Пока просто покажем сообщение
-        self.status.showMessage("Функция копирования скачанных игр будет добавлена")
+        selected_rows = [i.row() for i in self.list_downloaded_games.selectedIndexes()]
+        if not selected_rows:
+            self.status.showMessage("Выберите игры для копирования")
+            return
+
+        files = []
+        for row in selected_rows:
+            path, installed = self._downloaded_files[row]
+            if not installed:
+                files.append(str(path))
+
+        if files:
+            self._copy_files_to_flash(files)
+        else:
+            self.status.showMessage("Выбранные игры уже установлены")
 
     def _action_remove_from_usb(self):
         """Удалить выбранную игру с флешки"""

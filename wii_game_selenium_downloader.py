@@ -200,19 +200,21 @@ class WiiGameSeleniumDownloader:
 
 
     def download_game(self, game_url: str, game_title: str,
-                     game_id: Optional[str] = None, # Added game_id, optional
-                     progress_callback: Optional[Callable[..., None]] = None, # General signature
-                     stop_callback: Optional[Callable[[], bool]] = None) -> bool: # Added stop_callback
+                     progress_callback: Optional[Callable[..., None]] = None,
+                     stop_callback: Optional[Callable[[], bool]] = None,
+                     game_id: Optional[str] = None,
+                     total_size_bytes: Optional[int] = None) -> bool:
         """
         Загрузка игры
 
         Args:
             game_url: URL страницы игры
             game_title: Название игры для логов
-            game_id: ID игры (опционально, для информации)
             progress_callback: Функция обратного вызова для отображения прогресса
-                               (ожидает: percent, speed_MBs, eta_string)
+                               (ожидает: скачано_байт, всего_байт)
             stop_callback: Функция обратного вызова для проверки сигнала остановки
+            game_id: ID игры (опционально, для информации)
+            total_size_bytes: Предполагаемый размер игры в байтах (если известен)
 
         Returns:
             True если загрузка успешна, False иначе
@@ -221,9 +223,9 @@ class WiiGameSeleniumDownloader:
         self.progress_callback = progress_callback
         self.external_stop_callback = stop_callback
 
-        # TODO: Need a way to get game_total_size_bytes, perhaps from game object if available via game_id
-        # For now, this will be None, and percentage calculation will be basic or omitted in monitor.
-        game_total_size_bytes = None
+        # Размер игры может быть неизвестен. Если передан total_size_bytes,
+        # используем его для расчета процента и ETA в monitor_download_progress
+        game_total_size_bytes = total_size_bytes
         logger.info(f"Запрос на загрузку игры: {game_title} (ID: {game_id}), URL: {game_url}")
 
         try:

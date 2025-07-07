@@ -9,6 +9,7 @@ Handles real game downloading with progress tracking
 from __future__ import annotations
 
 import time
+import re
 
 from PySide6.QtCore import QThread, Signal
 from wii_game_parser import WiiGame
@@ -27,14 +28,36 @@ class DownloadThread(QThread):
         self.start_time = None
         self.downloader = None
 
+    def _parse_file_size(self, size_str: str) -> int:
+        """Convert size like '4.7 GB' to bytes."""
+        try:
+            if not size_str:
+                return 0
+            m = re.match(r"([\d\.]+)\s*([KMGT]?B)", size_str.strip(), re.I)
+            if not m:
+                return 0
+            value = float(m.group(1))
+            unit = m.group(2).upper()
+            factor = {
+                'KB': 1 << 10,
+                'MB': 1 << 20,
+                'GB': 1 << 30,
+                'TB': 1 << 40,
+            }.get(unit, 1)
+            return int(value * factor)
+        except Exception:
+            return 0
+
     def run(self):
         """Запуск загрузки"""
         try:
             # Импортируем загрузчик
             from wii_game_selenium_downloader import WiiGameSeleniumDownloader
             self.downloader = WiiGameSeleniumDownloader()
-            
+
             self.start_time = time.time()
+
+            total_size = self._parse_file_size(getattr(self.game, 'file_size', ''))
             
             def progress_callback(downloaded: int, total: int):
                 """Callback для отслеживания прогресса"""
@@ -79,11 +102,12 @@ class DownloadThread(QThread):
             
             # Начинаем скачивание
             success = self.downloader.download_game(
-                self.game.detail_url,  # URL страницы игры
-                self.game.title,       # Название игры
-                game_id=getattr(self.game, 'id', None),  # ID игры
-                progress_callback=progress_callback,      # Callback для прогресса
-                stop_callback=lambda: self.should_stop   # Callback для остановки
+                self.game.detail_url,
+                self.game.title,
+                game_id=getattr(self.game, 'id', None),
+                total_size_bytes=total_size,
+                progress_callback=progress_callback,
+                stop_callback=lambda: self.should_stop,
             )
             
             if success:
