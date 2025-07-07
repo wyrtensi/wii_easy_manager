@@ -91,10 +91,9 @@ class DownloadQueue(QObject): # Inherit from QObject for signals
     """Manages a queue of games to download one by one."""
     queue_changed = Signal(int)  # Number of items in queue
     download_started = Signal(WiiGame)
-    # Emits game and percentage (0-100)
-    # Or game, current_bytes, total_bytes, speed_mbps, eta_seconds
-    progress_changed = Signal(WiiGame, int) # For now, just percentage
-    download_finished = Signal(WiiGame) # Emits game, success (bool), message (str)
+    # Emits game, percentage (0-100), downloaded_bytes, total_bytes, speed_mbps (MB/s), eta_str
+    progress_changed = Signal(WiiGame, int, float, float, float, str)
+    download_finished = Signal(WiiGame) # Emits game (status will be updated)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -198,9 +197,10 @@ class DownloadQueue(QObject): # Inherit from QObject for signals
             percentage = 0
             if total_bytes > 0:
                 percentage = int((downloaded_bytes / total_bytes) * 100)
-            # TODO: Enhance progress_changed signal to include speed/ETA if needed by UI
-            # For now, sticking to percentage as per current GameCard implementation
-            self.progress_changed.emit(self._current_game, percentage)
+            else:
+                percentage = 0 # Or handle as indeterminate if total_bytes is unknown initially
+
+            self.progress_changed.emit(self._current_game, percentage, downloaded_bytes, total_bytes, speed_mbps, eta_str)
 
     @Slot(bool, str)
     def _on_selenium_download_finished(self, success: bool, result_path_or_msg: str):
@@ -472,8 +472,22 @@ class GameCard(QWidget):
 
         self._progress_bar = QProgressBar()
         self._progress_bar.setFixedHeight(30)
+        self._progress_bar.setTextVisible(True) # Show percentage text on bar
         self._progress_bar.hide()
         main_layout.addWidget(self._progress_bar)
+
+        # Labels for download speed and ETA
+        self._download_info_layout = QHBoxLayout()
+        self._speed_label = QLabel("Скорость: - MB/s")
+        self._eta_label = QLabel("ETA: --:--")
+        self._download_info_layout.addWidget(self._speed_label)
+        self._download_info_layout.addStretch()
+        self._download_info_layout.addWidget(self._eta_label)
+
+        self._download_info_widget = QWidget()
+        self._download_info_widget.setLayout(self._download_info_layout)
+        self._download_info_widget.hide() # Initially hidden
+        main_layout.addWidget(self._download_info_widget)
 
         main_layout.addStretch()
 
@@ -503,6 +517,9 @@ class GameCard(QWidget):
         self._btn_cancel.hide()
         self._progress_bar.hide()
         self._progress_bar.setValue(0)
+        self._download_info_widget.hide()
+        self._speed_label.setText("Скорость: - MB/s")
+        self._eta_label.setText("ETA: --:--")
         self._game = None
 
     def _on_download_clicked(self):
@@ -528,13 +545,26 @@ class GameCard(QWidget):
         # Check if the finished game is the one currently displayed on the card
         if self._game and game.title == self._game.title:
             self._update_download_button_state() # This will hide progress bar if status is not "downloading"
+            if getattr(self._game, "status", "new") != "downloading":
+                 self._download_info_widget.hide()
 
-    @Slot(WiiGame, int)
-    def _on_progress_changed(self, game: WiiGame, percent: int):
+
+    @Slot(WiiGame, int, float, float, float, str) # game, percent, downloaded_bytes, total_bytes, speed_mbps, eta_str
+    def _on_progress_changed(self, game: WiiGame, percent: int, downloaded_bytes: float, total_bytes: float, speed_mbps: float, eta_str: str):
         if self._game and game.title == self._game.title:
             self._progress_bar.setValue(percent)
-            if not self._progress_bar.isVisible() and getattr(self._game, "status", "new") == "downloading":
-                self._progress_bar.show() # Ensure it's visible if download starts while card is active
+            self._speed_label.setText(f"Скорость: {speed_mbps:.2f} MB/s")
+            self._eta_label.setText(f"ETA: {eta_str}")
+
+            # Ensure progress bar and info are visible if download is ongoing for this game
+            current_status = getattr(self._game, "status", "new")
+            if current_status == "downloading":
+                if not self._progress_bar.isVisible(): self._progress_bar.show()
+                if not self._download_info_widget.isVisible(): self._download_info_widget.show()
+            else: # If status changed (e.g. cancelled, error) while progress signal came
+                self._progress_bar.hide()
+                self._download_info_widget.hide()
+
 
     def _update_download_button_state(self):
         if not self._game:
@@ -1374,6 +1404,125 @@ class WiiUnifiedManager(QMainWindow):
         self.status.showMessage(f"Ошибка загрузки деталей: {error_message}")
         # Optionally show a QMessageBox to the user
         # QMessageBox.warning(self, "Ошибка деталей", f"Не удалось загрузить детали: {error_message}")
+
+###############################################################################
+# 🃏 ManagerGameCard - Displays info for local or USB games in Manager section #
+###############################################################################
+class ManagerGameCard(QWidget):
+    def __init__(self, main_window: 'WiiUnifiedManager', parent: Optional[QWidget] = None): # Forward reference
+        super().__init__(parent)
+        self.main_window = main_window
+        self.setObjectName("managerGameCard")
+        self.current_local_file_path: Optional[Path] = None
+        self.current_flash_game: Optional[FlashGame] = None
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15,15,15,15)
+
+        self.title_label = QLabel("Информация об элементе")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setWordWrap(True)
+        self.title_label.setStyleSheet(
+            f"background:{WII_WHITE};border:2px solid {WII_GREEN};" # Green border for manager card
+            "border-radius:12px;padding:10px;font-size:14pt;font-weight:bold;"
+        )
+        layout.addWidget(self.title_label)
+
+        self.info_widget = QWidget()
+        self.info_layout = QFormLayout(self.info_widget)
+        self.info_layout.setSpacing(8)
+        self.info_layout.setContentsMargins(5,5,5,5)
+        self.info_layout.setLabelAlignment(Qt.AlignRight) # Align labels to the right
+        layout.addWidget(self.info_widget)
+
+        # Action Buttons
+        self.btn_install_to_usb = QPushButton("💾 Установить на USB")
+        self.btn_install_to_usb.setProperty("success", True)
+        self.btn_delete_local = QPushButton("🗑️ Удалить файл")
+        self.btn_delete_local.setProperty("danger", True)
+        self.btn_delete_from_usb = QPushButton("❌ Удалить с USB")
+        self.btn_delete_from_usb.setProperty("danger", True)
+
+        self.buttons: List[QPushButton] = [self.btn_install_to_usb, self.btn_delete_local, self.btn_delete_from_usb]
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.btn_install_to_usb)
+        buttons_layout.addWidget(self.btn_delete_local)
+        buttons_layout.addWidget(self.btn_delete_from_usb)
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
+
+        layout.addStretch() # Push content to top
+
+        # Connect buttons
+        self.btn_install_to_usb.clicked.connect(lambda: self.main_window._action_install_to_usb(self.current_local_file_path) if self.current_local_file_path else None)
+        self.btn_delete_local.clicked.connect(lambda: self.main_window._action_delete_local_file(self.current_local_file_path) if self.current_local_file_path else None)
+        self.btn_delete_from_usb.clicked.connect(lambda: self.main_window._action_delete_from_usb(self.current_flash_game) if self.current_flash_game else None)
+
+        self.clear_card() # Initial state
+
+    def clear_card_content(self):
+        """Clears the content of the info_layout."""
+        while self.info_layout.rowCount() > 0:
+            self.info_layout.removeRow(0)
+        self.current_local_file_path = None
+        self.current_flash_game = None
+
+    def clear_card(self):
+        self.clear_card_content()
+        self.title_label.setText("Выберите элемент из списка")
+        self.set_buttons_enabled(False) # Disable all by default
+        self.btn_install_to_usb.hide()
+        self.btn_delete_local.hide()
+        self.btn_delete_from_usb.hide()
+
+    def update_for_local_file(self, file_path: Path, usb_drive_selected: bool):
+        self.clear_card_content()
+        self.current_local_file_path = file_path
+
+        self.title_label.setText(f"Локальный: {file_path.name}")
+        self.title_label.setToolTip(file_path.name)
+
+        size_gb = file_path.stat().st_size / (1024**3)
+        self.info_layout.addRow("Имя файла:", QLabel(file_path.name))
+        path_label = QLabel(str(file_path))
+        path_label.setWordWrap(True)
+        self.info_layout.addRow("Полный путь:", path_label)
+        self.info_layout.addRow("Размер:", QLabel(f"{size_gb:.2f} GB"))
+        self.info_layout.addRow("Тип:", QLabel(file_path.suffix.lstrip('.').upper()))
+
+        self.btn_install_to_usb.show()
+        self.btn_install_to_usb.setEnabled(usb_drive_selected)
+        self.btn_delete_local.show()
+        self.btn_delete_local.setEnabled(True)
+        self.btn_delete_from_usb.hide()
+
+    def update_for_usb_game(self, game: FlashGame):
+        self.clear_card_content()
+        self.current_flash_game = game
+
+        self.title_label.setText(f"На USB: {game.display_title}")
+        self.title_label.setToolTip(game.display_title)
+
+        size_gb = game.size / (1024**3)
+        self.info_layout.addRow("ID Игры:", QLabel(game.id if hasattr(game, 'id') else "N/A"))
+        path_label = QLabel(str(game.path))
+        path_label.setWordWrap(True)
+        self.info_layout.addRow("Путь на USB:", path_label)
+        self.info_layout.addRow("Размер:", QLabel(f"{size_gb:.2f} GB"))
+
+        self.btn_install_to_usb.hide()
+        self.btn_delete_local.hide()
+        self.btn_delete_from_usb.show()
+        self.btn_delete_from_usb.setEnabled(True)
+
+    def set_buttons_enabled(self, enabled: bool):
+        """Enable or disable all action buttons on the card."""
+        self.btn_install_to_usb.setEnabled(enabled and self.current_local_file_path is not None and self.main_window.current_usb_drive is not None)
+        self.btn_delete_local.setEnabled(enabled and self.current_local_file_path is not None)
+        self.btn_delete_from_usb.setEnabled(enabled and self.current_flash_game is not None)
 
 
 # ---------------------------------------------------------------------------
