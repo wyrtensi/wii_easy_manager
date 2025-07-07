@@ -91,12 +91,16 @@ class GameCard(QWidget):
         self._btn_dl = QPushButton("⬇️ Скачать")
         self._progress = QProgressBar()
         self._progress.hide()
+        self._speed_label = QLabel("")
+        self._speed_label.setAlignment(Qt.AlignCenter)
+        self._speed_label.hide()
 
         lay = QVBoxLayout(self)
         lay.addWidget(self._title)
         lay.addWidget(self._cover, alignment=Qt.AlignCenter)
         lay.addWidget(self._btn_dl, alignment=Qt.AlignCenter)
         lay.addWidget(self._progress)
+        lay.addWidget(self._speed_label)
         lay.addWidget(self._desc)
 
         # Connect signals
@@ -105,7 +109,12 @@ class GameCard(QWidget):
         queue.download_finished.connect(self._on_dl_finish)
         queue.progress_changed.connect(self._on_progress)
 
+        if hasattr(queue, 'speed_updated'):
+            queue.speed_updated.connect(self._on_speed_update)
+
         self._game: Optional[WiiGame] = None
+        self._total_size_mb: float = 0.0
+        self._current_percent: int = 0
 
     # ------------------------------------------------------------------
     def _refresh_btn(self):
@@ -133,24 +142,48 @@ class GameCard(QWidget):
         if self._game and g.title == self._game.title:
             self._progress.show()
             self._progress.setValue(0)
+            self._speed_label.show()
+            self._speed_label.setText("Подготовка к загрузке...")
             self._refresh_btn()
 
     @Slot(WiiGame)
     def _on_dl_finish(self, g: WiiGame):
         if self._game and g.title == self._game.title:
             self._progress.hide()
+            self._speed_label.hide()
             self._refresh_btn()
 
     @Slot(WiiGame, int)
     def _on_progress(self, g: WiiGame, percent: int):
         if self._game and g.title == self._game.title:
             self._progress.setValue(percent)
+            self._current_percent = percent
+            if self._total_size_mb:
+                downloaded_mb = self._total_size_mb * percent / 100
+                self._speed_label.setText(
+                    f"{downloaded_mb:.1f}/{self._total_size_mb:.1f} МБ"
+                )
+
+    @Slot(WiiGame, float, str)
+    def _on_speed_update(self, g: WiiGame, speed: float, eta: str):
+        if self._game and g.title == self._game.title:
+            suffix = ""
+            if self._total_size_mb:
+                downloaded_mb = self._total_size_mb * self._current_percent / 100
+                suffix = f" | {downloaded_mb:.1f}/{self._total_size_mb:.1f} МБ"
+            self._speed_label.show()
+            self._speed_label.setText(
+                f"⚡ {speed:.1f} МБ/с | ⏱ {eta}{suffix}"
+            )
 
     # ------------------------------------------------------------------
     def update_game(self, game: WiiGame):
         self._game = game
         self._title.setText(game.title)
         self._desc.setText(game.description or "Описание отсутствует.")
+        # Парсим размер файла для расчёта прогресса
+        self._total_size_mb = self._parse_size_mb(getattr(game, "file_size", ""))
+        self._current_percent = 0
         if game.cover_path and Path(game.cover_path).exists():
             pix = QPixmap(game.cover_path).scaled(
                 self._cover.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
@@ -159,6 +192,22 @@ class GameCard(QWidget):
         else:
             self._cover.setText("🖼️")
         self._refresh_btn()
+
+    @staticmethod
+    def _parse_size_mb(size_str: str) -> float:
+        import re
+        m = re.search(r"([\d\.]+)\s*(GB|MB|KB)", size_str.upper())
+        if not m:
+            return 0.0
+        val = float(m.group(1))
+        unit = m.group(2)
+        if unit == "GB":
+            return val * 1024
+        if unit == "MB":
+            return val
+        if unit == "KB":
+            return val / 1024
+        return 0.0
 
 ###############################################################################
 # 🌟 Animated navigation button                                               #

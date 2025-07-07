@@ -199,10 +199,15 @@ class WiiGameSeleniumDownloader:
             # else: file still exists, but loop terminated (e.g. stall)
 
 
-    def download_game(self, game_url: str, game_title: str,
-                     game_id: Optional[str] = None, # Added game_id, optional
-                     progress_callback: Optional[Callable[..., None]] = None, # General signature
-                     stop_callback: Optional[Callable[[], bool]] = None) -> bool: # Added stop_callback
+    def download_game(
+        self,
+        game_url: str,
+        game_title: str,
+        game_id: Optional[str] = None,
+        progress_callback: Optional[Callable[..., None]] = None,
+        stop_callback: Optional[Callable[[], bool]] = None,
+        total_size_bytes: Optional[int] = None,
+    ) -> bool:
         """
         Загрузка игры
 
@@ -221,9 +226,8 @@ class WiiGameSeleniumDownloader:
         self.progress_callback = progress_callback
         self.external_stop_callback = stop_callback
 
-        # TODO: Need a way to get game_total_size_bytes, perhaps from game object if available via game_id
-        # For now, this will be None, and percentage calculation will be basic or omitted in monitor.
-        game_total_size_bytes = None
+        # Общий размер файла, если известен (может быть None)
+        game_total_size_bytes = total_size_bytes
         logger.info(f"Запрос на загрузку игры: {game_title} (ID: {game_id}), URL: {game_url}")
 
         try:

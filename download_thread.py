@@ -33,6 +33,9 @@ class DownloadThread(QThread):
             # Импортируем загрузчик
             from wii_game_selenium_downloader import WiiGameSeleniumDownloader
             self.downloader = WiiGameSeleniumDownloader()
+
+            # Попробуем определить общий размер файла
+            total_size_bytes = self._parse_size_to_bytes(getattr(self.game, "file_size", ""))
             
             self.start_time = time.time()
             
@@ -83,17 +86,19 @@ class DownloadThread(QThread):
                 self.game.title,       # Название игры
                 game_id=getattr(self.game, 'id', None),  # ID игры
                 progress_callback=progress_callback,      # Callback для прогресса
-                stop_callback=lambda: self.should_stop   # Callback для остановки
+                stop_callback=lambda: self.should_stop,   # Callback для остановки
+                total_size_bytes=total_size_bytes,
             )
             
             if success:
                 files = self.downloader.get_downloaded_files()
                 if files:
-                    # Проверяем, нужно ли распаковать архив
                     extracted_files = self._extract_if_needed(files)
                     if extracted_files:
+                        self.game.local_path = extracted_files[0]
                         self.download_finished.emit(True, f"Игра '{self.game.title}' успешно скачана и распакована!")
                     else:
+                        self.game.local_path = files[0]
                         self.download_finished.emit(True, f"Игра '{self.game.title}' успешно скачана!")
                 else:
                     self.download_finished.emit(False, "Файл не найден после загрузки")
@@ -121,30 +126,58 @@ class DownloadThread(QThread):
         if self.downloader and hasattr(self.downloader, 'stop_download'):
             self.downloader.stop_download()
 
+    @staticmethod
+    def _parse_size_to_bytes(size_str: str) -> int:
+        """Простое преобразование строки размера вида '4.3 GB' в байты."""
+        try:
+            import re
+            match = re.search(r"([\d\.]+)\s*(GB|MB|KB)", size_str.upper())
+            if not match:
+                return 0
+            value = float(match.group(1))
+            unit = match.group(2)
+            if unit == "GB":
+                return int(value * 1024 ** 3)
+            if unit == "MB":
+                return int(value * 1024 ** 2)
+            if unit == "KB":
+                return int(value * 1024)
+        except Exception:
+            pass
+        return 0
+
     def _check_existing_file(self) -> bool:
-        """Проверяет, есть ли уже скачанный файл"""
+        """Проверяет, есть ли уже скачанный файл и сохраняет путь."""
         try:
             from pathlib import Path
             downloads_dir = Path("downloads")
-            
-            # Ищем файлы игры по названию
-            game_title_clean = "".join(c for c in self.game.title if c.isalnum() or c in (' ', '-', '_')).strip()
-            
-            # Проверяем различные форматы файлов
-            for ext in ['.iso', '.wbfs', '.rvz', '.7z']:
+
+            game_title_clean = "".join(c for c in self.game.title if c.isalnum() or c in (" ", "-", "_")).strip()
+
+            # Проверяем различные форматы
+            for ext in [".iso", ".wbfs", ".rvz", ".7z"]:
                 for file_path in downloads_dir.glob(f"*{game_title_clean}*{ext}"):
                     if file_path.exists():
-                        print(f"Найден существующий файл: {file_path}")
+                        if ext == ".7z":
+                            extracted = self._extract_if_needed([file_path])
+                            if extracted:
+                                self.game.local_path = extracted[0]
+                        else:
+                            self.game.local_path = str(file_path)
                         return True
-                        
-            # Проверяем по ID игры, если есть
-            if hasattr(self.game, 'id') and self.game.id:
-                for ext in ['.iso', '.wbfs', '.rvz', '.7z']:
+
+            if hasattr(self.game, "id") and self.game.id:
+                for ext in [".iso", ".wbfs", ".rvz", ".7z"]:
                     for file_path in downloads_dir.glob(f"*{self.game.id}*{ext}"):
                         if file_path.exists():
-                            print(f"Найден существующий файл по ID: {file_path}")
+                            if ext == ".7z":
+                                extracted = self._extract_if_needed([file_path])
+                                if extracted:
+                                    self.game.local_path = extracted[0]
+                            else:
+                                self.game.local_path = str(file_path)
                             return True
-                            
+
             return False
             
         except Exception as e:
