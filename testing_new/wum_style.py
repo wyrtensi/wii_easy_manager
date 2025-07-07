@@ -24,7 +24,12 @@ def build_style() -> str:
         background: {WII_LIGHT_GRAY};
         font-family: 'Segoe UI', 'Comic Sans MS', sans-serif;
         font-size: 12pt;
-        color: black;
+        color: {WII_DARK_GRAY}; /* Changed from black for consistency */
+    }}
+
+    QLabel {{ /* Default QLabel style */
+        color: {WII_DARK_GRAY};
+        padding: 2px; /* Add some default padding */
     }}
 
     QLabel[headerTitle="true"] {{
@@ -72,14 +77,15 @@ def build_style() -> str:
         border: 2px solid {WII_GRAY};
         border-radius: 12px;
         padding: 8px;
-        color: black;
+        color: {WII_DARK_GRAY}; /* Changed from black */
     }}
     QListWidget::item {{
         border-radius: 12px;
         margin: 4px;
         padding: 10px;
+        color: {WII_DARK_GRAY}; /* Ensure item text is dark */
     }}
-    QListWidget::item:selected {{ background: {WII_LIGHT_BLUE}; color: black; }}
+    QListWidget::item:selected {{ background: {WII_LIGHT_BLUE}; color: {WII_DARK_GRAY}; }} /* Ensure selected item text is dark */
 
     QSplitter::handle {{
         background: {WII_GRAY};
@@ -89,7 +95,7 @@ def build_style() -> str:
 
     QStatusBar {{
         background: {WII_WHITE};
-        color: black;
+        color: {WII_DARK_GRAY}; /* Changed from black */
     }}
 
     QProgressBar {{
