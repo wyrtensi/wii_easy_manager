@@ -186,25 +186,19 @@ class WiiGameSeleniumDownloader:
             return f"{hours} ч {minutes} мин"
 
     def download_game(self, game_url: str, game_title: str,
-                     progress_callback: Optional[Callable[[int, int, float, str], None]] = None,
+                     progress_callback: Optional[Callable[[int, int, float, str], None]] = None, # Corrected signature
                      should_stop_external_check: Optional[Callable[[], bool]] = None) -> bool:
         self.should_stop = False
         self.progress_callback = progress_callback
 
         estimated_size_gb = 4.0
-        # Vimm.net game pages don't typically give direct file links or Content-Length before Selenium interaction.
-        # So, a pre-emptive HEAD request on game_url (HTML page) won't give file size.
-        # We rely on the default or could try to parse it from game details if available.
-
         logger.info(f"Preparing to download {game_title} from {game_url}")
 
         if not self.setup_driver():
             if self.should_stop: logger.info("Driver setup aborted by stop request.")
             return False
 
-        # self.cleanup_downloads() # Clean only .crdownload, not all files
-
-        max_attempts = 3 # Reduced attempts for faster failure if problematic
+        max_attempts = 3
         success = False
         for attempt in range(max_attempts):
             if self.should_stop or (should_stop_external_check and should_stop_external_check()):
@@ -219,42 +213,39 @@ class WiiGameSeleniumDownloader:
                     filepath = crdownload_files[0]
                     logger.info(f"Monitoring {filepath.name} for {game_title}")
 
-                    # The monitoring will run until file is gone or stop is signaled
                     self.monitor_download_progress(filepath, estimated_size_gb, should_stop_external_check)
 
-                    if self.should_stop: # If stop_download was called during monitor
+                    if self.should_stop:
                         logger.info(f"Download of {game_title} was stopped.")
                         success = False
-                        break # Exit attempts loop
+                        break
 
-                    # Check if download completed (no .crdownload, final file exists)
-                    final_filename = filepath.stem # Filename without .crdownload
+                    final_filename = filepath.stem
                     final_filepath = self.download_dir / final_filename
                     if final_filepath.exists():
                         logger.info(f"Download completed successfully: {final_filename}")
                         success = True
-                        break # Success, exit attempts loop
+                        break
                     else:
                         logger.warning(f".crdownload for {game_title} disappeared, but final file not found. Assuming failure or cancellation.")
-                        success = False # Continue to next attempt if any
+                        success = False
                 else:
                     logger.warning(f"try_start_download succeeded for {game_title} but no .crdownload file found immediately after.")
                     success = False
-            else: # try_start_download failed
+            else:
                 success = False
 
             if not success and attempt < max_attempts - 1 and not self.should_stop:
                 logger.info(f"Attempt {attempt + 1} failed for {game_title}. Retrying after delay...")
                 if self.driver:
                     try:
-                        # Try to navigate away or refresh to reset state if possible
                         self.driver.get("chrome://version")
                         time.sleep(2)
                     except Exception as e_nav:
                         logger.warning(f"Could not navigate away during retry prep: {e_nav}")
-                else: # If driver died, need to re-setup
-                    if not self.setup_driver(): break # Stop if can't re-setup
-                time.sleep(5) # Wait before retrying
+                else:
+                    if not self.setup_driver(): break
+                time.sleep(5)
             elif self.should_stop:
                 break
 
@@ -275,13 +266,11 @@ class WiiGameSeleniumDownloader:
         if self.driver:
             logger.info("Attempting to close WebDriver to halt download.")
             try:
-                # Navigating to cancel URL might not be effective if download is browser-native
-                # Closing the driver is more direct.
                 self.driver.quit()
             except Exception as e:
                 logger.error(f"Error trying to quit driver in stop_download: {e}")
             finally:
-                self.driver = None # Ensure it's cleared
+                self.driver = None
         else:
             logger.info("No active WebDriver to stop.")
 
@@ -297,12 +286,8 @@ class WiiGameSeleniumDownloader:
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
 
-    # Basic test
     downloader = WiiGameSeleniumDownloader(download_dir="test_selenium_downloads")
-
-    # Example: Need for Speed Carbon URL (replace with a valid game page from vimm.net)
-    # Ensure the game is small enough for a quick test or be prepared to wait/cancel.
-    test_game_url = "https://vimm.net/vault/17830" # Example: Animal Crossing (EUR) - relatively small
+    test_game_url = "https://vimm.net/vault/17830"
     test_game_title = "Animal Crossing City Folk EUR"
 
     def my_progress_callback(current_bytes, total_bytes, speed_mbps, eta_str):
@@ -311,19 +296,9 @@ if __name__ == '__main__':
 
     print(f"Starting test download for {test_game_title}...")
 
-    # Simulate external stop after 15 seconds for testing cancellation
     stop_flag = False
     def external_stop_check():
         return stop_flag
-
-    #threading.Timer(15, lambda: setattr(downloader, 'should_stop', True)).start() # Stop via internal flag
-    # Or to test external_stop_check:
-    # def set_stop_true():
-    #     global stop_flag
-    #     print("EXTERNAL STOP SIGNAL SET")
-    #     stop_flag = True
-    # threading.Timer(25, set_stop_true).start()
-
 
     success = downloader.download_game(test_game_url, test_game_title, my_progress_callback, external_stop_check)
 
@@ -331,15 +306,7 @@ if __name__ == '__main__':
         print(f"Test download SUCCEEDED for {test_game_title}.")
         files = downloader.get_downloaded_files()
         print("Downloaded files:", [f.name for f in files])
-        # Clean up test file
-        # for f in files: os.remove(f)
     else:
         print(f"Test download FAILED or was CANCELLED for {test_game_title}.")
-
-    # Test cleanup of .crdownload (if any left)
-    # downloader.cleanup_downloads()
-    # if os.path.exists("test_selenium_downloads"):
-    #     import shutil
-    #     # shutil.rmtree("test_selenium_downloads")
 
     print("Test finished.")

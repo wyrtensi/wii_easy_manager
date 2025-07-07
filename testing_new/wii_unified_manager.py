@@ -14,10 +14,6 @@ Wii Unified Manager 2.4
 from __future__ import annotations
 
 import sys
-import time # For timestamps
-import json # For JSON operations
-import base64 # For base64 image decoding
-import requests # For HTTP requests
 from pathlib import Path
 import os # For path manipulation
 from typing import List, Optional, Dict # Added Dict
@@ -38,7 +34,7 @@ from PySide6.QtCore import (
     QSize,   # Already here
     QTimer   # Already here
 )
-from PySide6.QtGui import QIcon, QPixmap, QAction   # Added QAction for menu actions
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -60,14 +56,18 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QMessageBox,
     QComboBox, # Added QComboBox
-    QFileDialog, # Added QFileDialog for file dialogs
 )
 # from PySide6.QtCore import QThread, Signal, QSize, QTimer # Moved up
+
+import base64 # For image loading
+import requests # For image loading
+import json # For database
+import time # For download delay
+from collections import deque # For the download queue
 
 # ────────────────────────────────────────────────────────────────────────────
 # Local modules
 # ────────────────────────────────────────────────────────────────────────────
-from collections import deque # For the download queue
 from wum_style import build_style, WII_BLUE, WII_GRAY, WII_WHITE, WII_LIGHT_GRAY, WII_LIGHT_BLUE, WII_GREEN, WII_DARK_GRAY # type: ignore
 # from download_queue import DownloadQueue # type: ignore # Defined in this file
 from wii_game_parser import WiiGame, WiiGameParser, WiiGameDatabase
@@ -406,25 +406,15 @@ class GameCard(QWidget):
         images_layout.addWidget(self._disc_art_label)
         main_layout.addWidget(images_container)
 
-        # --- Вкладки для информации ---
-        self._tabs = QTabWidget()
-        self._tabs.setStyleSheet(f"""
-            QTabWidget::pane {{ border: 1px solid {WII_GRAY}; border-radius: 8px; background-color: {WII_WHITE}; }}
-            QTabBar::tab {{
-                background-color: {WII_LIGHT_GRAY}; color: {WII_BLUE}; padding: 8px 15px; margin-right: 1px;
-                border: 1px solid {WII_GRAY}; border-bottom: none;
-                border-top-left-radius: 8px; border-top-right-radius: 8px; font-weight: bold;
-            }}
-            QTabBar::tab:selected {{ background-color: {WII_BLUE}; color: white; }}
-            QTabBar::tab:hover {{ background-color: {WII_LIGHT_BLUE}; }}
-        """)
-
-        # Вкладка "Общая информация"
-        self._general_tab = QWidget()
-        general_layout = QFormLayout(self._general_tab)
-        general_layout.setSpacing(8)
-        general_layout.setContentsMargins(10, 10, 10, 10)
         self._field_labels: Dict[str, QLabel] = {} # To store labels for updating
+
+        # --- General Information Group ---
+        general_group = QGroupBox("Основная информация")
+        general_group.setStyleSheet(f"QGroupBox {{ font-size: 11pt; font-weight: bold; color: {WII_BLUE}; margin-top: 10px; }}")
+        general_layout = QFormLayout(general_group)
+        general_layout.setSpacing(6)
+        general_layout.setContentsMargins(10, 15, 10, 10) # More top margin for title
+        general_layout.setLabelAlignment(Qt.AlignRight)
 
         info_fields = [
             ("Регион:", "region"), ("Версия:", "version"), ("Языки:", "languages"),
@@ -433,31 +423,39 @@ class GameCard(QWidget):
         ]
         for label_text, attr_name in info_fields:
             field_label_widget = QLabel("...")
-            field_label_widget.setStyleSheet(f"background-color: {WII_LIGHT_GRAY}; border: 1px solid {WII_GRAY}; border-radius: 4px; padding: 3px 6px; font-size: 10pt;")
-            general_layout.addRow(label_text, field_label_widget)
+            field_label_widget.setStyleSheet(f"background-color: {WII_LIGHT_GRAY}; color: {WII_DARK_GRAY}; border: 1px solid {WII_GRAY}; border-radius: 4px; padding: 4px 8px; font-size: 10pt;")
+            field_label_widget.setWordWrap(True)
+            general_layout.addRow(QLabel(label_text), field_label_widget)
             self._field_labels[attr_name] = field_label_widget
-        self._tabs.addTab(self._general_tab, "Основное")
+        main_layout.addWidget(general_group)
 
-        # Вкладка "Оценки и CRC"
-        self._ratings_tab = QWidget()
-        ratings_layout = QFormLayout(self._ratings_tab)
-        ratings_layout.setSpacing(8)
-        ratings_layout.setContentsMargins(10, 10, 10, 10)
+        # --- Ratings and CRC Group ---
+        ratings_group = QGroupBox("Оценки и CRC")
+        ratings_group.setStyleSheet(f"QGroupBox {{ font-size: 11pt; font-weight: bold; color: {WII_BLUE}; margin-top: 10px; }}")
+        ratings_layout = QFormLayout(ratings_group)
+        ratings_layout.setSpacing(6)
+        ratings_layout.setContentsMargins(10, 15, 10, 10)
+        ratings_layout.setLabelAlignment(Qt.AlignRight)
+
         rating_fields = [
             ("Графика:", "graphics"), ("Звук:", "sound"), ("Геймплей:", "gameplay"),
             ("Общий:", "overall"), ("CRC:", "crc"), ("Проверено:", "verified")
         ]
         for label_text, attr_name in rating_fields:
             field_label_widget = QLabel("...")
-            field_label_widget.setStyleSheet(f"background-color: {WII_LIGHT_GRAY}; border: 1px solid {WII_GRAY}; border-radius: 4px; padding: 3px 6px; font-size: 10pt;")
-            ratings_layout.addRow(label_text, field_label_widget)
+            field_label_widget.setStyleSheet(f"background-color: {WII_LIGHT_GRAY}; color: {WII_DARK_GRAY}; border: 1px solid {WII_GRAY}; border-radius: 4px; padding: 4px 8px; font-size: 10pt;")
+            field_label_widget.setWordWrap(True)
+            ratings_layout.addRow(QLabel(label_text), field_label_widget)
             self._field_labels[attr_name] = field_label_widget
-        self._tabs.addTab(self._ratings_tab, "Оценки")
+        main_layout.addWidget(ratings_group)
 
-        main_layout.addWidget(self._tabs)
+        # --- Download Buttons and Progress ---
+        download_controls_container = QWidget() # Container for buttons and progress
+        download_controls_layout = QVBoxLayout(download_controls_container)
+        download_controls_layout.setContentsMargins(0,5,0,0) # Add some top margin
+        download_controls_layout.setSpacing(8)
 
-        # --- Кнопка скачивания, отмены и прогресс-бар ---
-        self._download_buttons_layout = QHBoxLayout()
+        self._download_buttons_layout = QHBoxLayout() # For Download and Cancel buttons
 
         self._btn_dl = QPushButton("⬇️ Скачать")
         self._btn_dl.setFixedHeight(40)
@@ -465,11 +463,10 @@ class GameCard(QWidget):
 
         self._btn_cancel = QPushButton("❌ Отменить")
         self._btn_cancel.setFixedHeight(40)
-        self._btn_cancel.setProperty("danger", True) # Use style from wum_style.py
-        self._btn_cancel.hide() # Initially hidden
+        self._btn_cancel.setProperty("danger", True)
+        self._btn_cancel.hide()
         self._download_buttons_layout.addWidget(self._btn_cancel)
-
-        main_layout.addLayout(self._download_buttons_layout)
+        download_controls_layout.addLayout(self._download_buttons_layout) # Add button layout to container
 
         self._progress_bar = QProgressBar()
         self._progress_bar.setFixedHeight(30)
@@ -487,9 +484,10 @@ class GameCard(QWidget):
 
         self._download_info_widget = QWidget()
         self._download_info_widget.setLayout(self._download_info_layout)
-        self._download_info_widget.hide() # Initially hidden
-        main_layout.addWidget(self._download_info_widget)
+        self._download_info_widget.hide()
+        download_controls_layout.addWidget(self._download_info_widget) # Add info to container
 
+        main_layout.addWidget(download_controls_container) # Add container to main card layout
         main_layout.addStretch()
 
         # --- Подключение сигналов ---
@@ -799,7 +797,7 @@ class WiiUnifiedManager(QMainWindow):
         help_menu.addAction(about_action)
 
     def _action_export_to_json(self):
-        games_to_export = self.db.games # Use the games attribute directly
+        games_to_export = self.db.get_all_games()
         if not games_to_export:
             QMessageBox.information(self, "Экспорт", "Нет игр в базе для экспорта.")
             return
@@ -858,6 +856,7 @@ class WiiUnifiedManager(QMainWindow):
     # ------------------------------------------------------------------
     def _build_search_page(self) -> QWidget:
         page = QWidget()
+        page.setStyleSheet(f"background-color: {WII_LIGHT_GRAY};") # Ensure page background
         vbox = QVBoxLayout(page)
         vbox.setContentsMargins(5,5,5,5) # Add some margin
 
@@ -903,6 +902,7 @@ class WiiUnifiedManager(QMainWindow):
     # ------------------------------------------------------------------
     def _build_manager_page(self) -> QWidget:
         page = QWidget()
+        page.setStyleSheet(f"background-color: {WII_LIGHT_GRAY};") # Ensure page background
         root_layout = QVBoxLayout(page)
         root_layout.setContentsMargins(5,5,5,5)
 
@@ -1210,7 +1210,7 @@ class WiiUnifiedManager(QMainWindow):
         if ENHANCED_DRIVE_AVAILABLE:
             self.drive_combo.currentIndexChanged.connect(self._on_drive_selected)
             self.btn_refresh_drives.clicked.connect(self._refresh_drives_list)
-            self.btn_import_external.clicked.connect(self._action_import_external_to_usb) # Connect import button
+            # self.btn_import_external.clicked.connect(self._import_external_to_usb) # TODO: Implement
 
         self.list_downloaded_games.currentItemChanged.connect(self._on_local_game_selected_manager)
         self.list_usb_games.currentItemChanged.connect(self._on_usb_game_selected_manager)
@@ -1241,12 +1241,11 @@ class WiiUnifiedManager(QMainWindow):
         QMessageBox.information(self, "Загрузка завершена", f"Игра '{game.title}' скачана.")
 
 
-    def _on_actual_download_progress(self, game: WiiGame, percent: int, downloaded_bytes: float, total_bytes: float, speed_mbps: float, eta_str: str):
+    def _on_actual_download_progress(self, game: WiiGame, percent: int):
         # Status bar could show overall progress if multiple downloads were allowed
         # For now, card handles its own progress if it's the selected game
         if self.card._game and self.card._game.title == game.title:
-            # Forward to card with all parameters
-            self.card._on_progress_changed(game, percent, downloaded_bytes, total_bytes, speed_mbps, eta_str)
+            self.card._on_progress_changed(game, percent) # Forward to card
         # We could also update a progress bar in the list item itself if desired
 
     # ------------------------------------------------------------------
@@ -1264,7 +1263,7 @@ class WiiUnifiedManager(QMainWindow):
         """Загружает игры из локальной базы данных (JSON файла)."""
         self.status.showMessage("Загрузка игр из кеша...")
         self.db.load_database() # WiiGameDatabase handles the loading
-        cached_games = self.db.games # Use the games attribute directly
+        cached_games = self.db.get_all_games() # Assuming a method to get all games
         self._populate_game_list(cached_games)
         if cached_games:
             self.status.showMessage(f"Загружено {len(cached_games)} игр из кеша.")
@@ -1510,7 +1509,7 @@ class ManagerGameCard(QWidget):
 
         size_gb = game.size / (1024**3)
         self.info_layout.addRow("ID Игры:", QLabel(game.id if hasattr(game, 'id') else "N/A"))
-        path_label = QLabel(str(game.path))
+        path_label = QLabel(str(game.dir)) # Changed game.path to game.dir
         path_label.setWordWrap(True)
         self.info_layout.addRow("Путь на USB:", path_label)
         self.info_layout.addRow("Размер:", QLabel(f"{size_gb:.2f} GB"))
