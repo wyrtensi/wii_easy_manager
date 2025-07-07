@@ -23,7 +23,7 @@ class DownloadQueue(QObject):
     download_started = Signal(WiiGame)  # начало загрузки
     download_finished = Signal(WiiGame)  # окончание загрузки
     progress_changed = Signal(WiiGame, int)  # прогресс в процентах
-    speed_updated = Signal(WiiGame, float, str)  # скорость (MB/s) и время до завершения
+    speed_updated = Signal(WiiGame, float, str, int, int)  # скорость, ETA и данные
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -83,13 +83,11 @@ class DownloadQueue(QObject):
             percent = int((downloaded / total) * 100)
             self.progress_changed.emit(game, percent)
         else:
-            # Индетерминированный прогресс - показываем анимированный индикатор
-            # Используем время для создания пульсирующего эффекта
             import time
-            pulse = int((time.time() * 2) % 100)  # Пульсация от 0 до 100
+            pulse = int((time.time() * 2) % 100)
             self.progress_changed.emit(game, pulse)
-        
-        self.speed_updated.emit(game, speed, eta)
+
+        self.speed_updated.emit(game, speed, eta, downloaded, total)
 
     def _on_download_finished(self, game: WiiGame, success: bool, message: str):
         """Обработка завершения загрузки"""

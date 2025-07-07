@@ -169,11 +169,14 @@ class GameCard(QWidget):
         if self._game and g.title == self._game.title:
             self._progress.setValue(percent)
     
-    @Slot(WiiGame, float, str)
-    def _on_speed_update(self, g: WiiGame, speed: float, eta: str):
+    @Slot(WiiGame, float, str, int, int)
+    def _on_speed_update(self, g: WiiGame, speed: float, eta: str, downloaded: int, total: int):
         """Обновление информации о скорости и времени"""
         if self._game and g.title == self._game.title:
-            speed_text = f"⚡ {speed:.1f} МБ/с | ⏱️ {eta}"
+            size_info = ""
+            if total > 0:
+                size_info = f"{downloaded / (1024**2):.1f}/{total / (1024**2):.1f} МБ | "
+            speed_text = f"⚡ {speed:.1f} МБ/с | {size_info}⏱️ {eta}"
             self._speed_label.setText(speed_text)
 
     # ------------------------------------------------------------------
@@ -556,8 +559,11 @@ class WiiUnifiedManager(QMainWindow):
 
         self._games: List[WiiGame] = []
         self._flash_games = []  # Список игр с флешки
+        self._downloaded_games = []
+        self._downloaded_game_items = {}
         self.current_drive = None  # Текущая выбранная флешка
         self._connect_signals()
+        self._load_downloaded_games()
         
         # Подключаем сигнал поиска
         self.search_completed.connect(self._populate_list)
@@ -643,7 +649,15 @@ class WiiUnifiedManager(QMainWindow):
         search_layout.addWidget(self.flash_search)
         left_layout.addLayout(search_layout)
         
-        # Games list
+        # Downloaded games list
+        downloaded_label = QLabel("⬇️ Скачанные игры:")
+        left_layout.addWidget(downloaded_label)
+        self.list_downloaded_games = QListWidget()
+        left_layout.addWidget(self.list_downloaded_games, 1)
+
+        # Games on flash list
+        flash_label = QLabel("💾 Игры на флешке:")
+        left_layout.addWidget(flash_label)
         self.list_flash_games = QListWidget()
         self.list_flash_games.setMinimumWidth(300)
         left_layout.addWidget(self.list_flash_games, 1)
@@ -695,9 +709,10 @@ class WiiUnifiedManager(QMainWindow):
         self.btn_copy_downloaded.clicked.connect(self._action_copy_downloaded_to_usb)
         self.btn_remove_from_flash.clicked.connect(self._action_remove_from_usb)
         self.btn_verify_games.clicked.connect(self._action_verify_games)
-        
+
         # Flash games list selection
         self.list_flash_games.currentRowChanged.connect(self._flash_game_selected)
+        self.list_downloaded_games.currentRowChanged.connect(self._downloaded_selection_changed)
         
         # Search in flash games
         self.flash_search.textChanged.connect(self._filter_flash_games)
@@ -713,11 +728,13 @@ class WiiUnifiedManager(QMainWindow):
             self.queue.queue_changed.connect(lambda n: self.status.showMessage(f"Очередь: {n} игр"))
             self.queue.download_started.connect(lambda g: self.status.showMessage(f"⬇️ Скачивание: {g.title}…"))
             self.queue.download_finished.connect(lambda g: self.status.showMessage(f"✅ Завершено: {g.title}"))
+            self.queue.download_finished.connect(self._on_queue_download_finished)
             
             # Подключаем сигналы для обновления информации о загрузках
             self.queue.queue_changed.connect(self._update_downloads_info)
             self.queue.download_started.connect(self._update_downloads_info)
             self.queue.download_finished.connect(self._update_downloads_info)
+            self.queue.progress_changed.connect(self._on_queue_progress_changed)
             
             # Подключаем сигнал скорости для обновления статуса
             if hasattr(self.queue, 'speed_updated'):
@@ -725,9 +742,12 @@ class WiiUnifiedManager(QMainWindow):
         else:
             print("Warning: DownloadQueue not initialized when connecting signals.")
 
-    def _on_speed_update(self, game: WiiGame, speed: float, eta: str):
+    def _on_speed_update(self, game: WiiGame, speed: float, eta: str, downloaded: int, total: int):
         """Обновление статуса с информацией о скорости"""
-        self.status.showMessage(f"⬇️ {game.title}: {speed:.1f} МБ/с, осталось {eta}")
+        size_info = ""
+        if total > 0:
+            size_info = f"{downloaded / (1024**2):.1f}/{total / (1024**2):.1f} МБ | "
+        self.status.showMessage(f"⬇️ {game.title}: {speed:.1f} МБ/с | {size_info}осталось {eta}")
 
     def _update_downloads_info(self, *args):
         """Обновление информации о загрузках"""
@@ -760,6 +780,13 @@ class WiiUnifiedManager(QMainWindow):
             self.flash_card.update_game(game)
         else:
             self.flash_card.update_game(None)
+
+    def _downloaded_selection_changed(self, row: int):
+        """Просто обновляем статус при выборе скачанной игры"""
+        if 0 <= row < len(self._downloaded_games):
+            info = self._downloaded_games[row]
+            status = "установлена" if info.get("installed") else "не установлена"
+            self.status.showMessage(f"{info['title']} - {status}")
 
     def _filter_flash_games(self, text: str):
         """Фильтрация игр с флешки по тексту поиска"""
@@ -831,9 +858,10 @@ class WiiUnifiedManager(QMainWindow):
             space_info = self.current_drive.get_space_info()
             info_text = f"💾 {space_info['free_gb']:.1f} ГБ свободно из {space_info['total_gb']:.1f} ГБ"
             self.drive_info_label.setText(info_text)
-            
+
             # Загружаем игры
             self._load_flash_games()
+            self._load_downloaded_games()
             self.status.showMessage(f"Выбрана флешка: {self.current_drive.name}")
         else:
             self.drive_info_label.setText("")
@@ -889,6 +917,56 @@ class WiiUnifiedManager(QMainWindow):
         # Сбрасываем выбор карточки
         self.flash_card.update_game(None)
 
+    def _on_queue_progress_changed(self, game: WiiGame, percent: int):
+        """Обновление строки списка скачанных игр"""
+        item = self._downloaded_game_items.get(game.title)
+        if item:
+            base = item.data(Qt.UserRole)
+            item.setText(f"{base} - {percent}%")
+
+    def _on_queue_download_finished(self, game: WiiGame):
+        """После завершения загрузки обновляем список"""
+        self._load_downloaded_games()
+
+    def _load_downloaded_games(self):
+        """Загрузить список скачанных игр из папки downloads"""
+        from pathlib import Path
+        import re
+        downloads_dir = Path("downloads")
+        downloads_dir.mkdir(exist_ok=True)
+
+        self._downloaded_games = []
+        for path in downloads_dir.glob('*'):
+            if path.suffix.lower() in ('.iso', '.wbfs', '.rvz'):
+                info = {
+                    'path': path,
+                    'size': path.stat().st_size,
+                    'title': path.stem,
+                    'installed': False,
+                    'id': ''
+                }
+                m = re.search(r'\[(.+?)\]', path.stem)
+                if m:
+                    info['id'] = m.group(1)
+                if any(g.id == info['id'] for g in self._flash_games):
+                    info['installed'] = True
+                self._downloaded_games.append(info)
+
+        self._update_downloaded_list()
+
+    def _update_downloaded_list(self):
+        """Обновить виджет списка скачанных игр"""
+        self.list_downloaded_games.clear()
+        self._downloaded_game_items = {}
+        for info in self._downloaded_games:
+            emoji = '✅' if info['installed'] else '⬇️'
+            size_gb = info['size'] / (1024**3)
+            base_text = f"{emoji} {info['title']} ({size_gb:.1f} ГБ)"
+            item = QListWidgetItem(base_text)
+            item.setData(Qt.UserRole, base_text)
+            self.list_downloaded_games.addItem(item)
+            self._downloaded_game_items[info['title']] = item
+
     def _action_add_external_to_usb(self):
         """Добавить внешние игры на флешку"""
         if not self.current_drive:
@@ -911,10 +989,13 @@ class WiiUnifiedManager(QMainWindow):
         if not self.current_drive:
             self.status.showMessage("Сначала выберите флешку")
             return
-            
-        # Здесь нужно найти скачанные игры
-        # Пока просто покажем сообщение
-        self.status.showMessage("Функция копирования скачанных игр будет добавлена")
+        rows = {idx.row() for idx in self.list_downloaded_games.selectedIndexes()}
+        if not rows:
+            self.status.showMessage("Выберите игру в списке скачанных")
+            return
+
+        files = [str(self._downloaded_games[r]['path']) for r in rows]
+        self._copy_files_to_flash(files)
 
     def _action_remove_from_usb(self):
         """Удалить выбранную игру с флешки"""

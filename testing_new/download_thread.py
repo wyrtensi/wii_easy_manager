@@ -77,13 +77,17 @@ class DownloadThread(QThread):
                 self.download_finished.emit(True, f"Игра '{self.game.title}' уже скачана!")
                 return
             
+            # Определяем общий размер файла если возможно
+            total_bytes = self._parse_file_size(getattr(self.game, "file_size", ""))
+
             # Начинаем скачивание
             success = self.downloader.download_game(
                 self.game.detail_url,  # URL страницы игры
                 self.game.title,       # Название игры
                 game_id=getattr(self.game, 'id', None),  # ID игры
                 progress_callback=progress_callback,      # Callback для прогресса
-                stop_callback=lambda: self.should_stop   # Callback для остановки
+                stop_callback=lambda: self.should_stop,   # Callback для остановки
+                total_size_bytes=total_bytes,
             )
             
             if success:
@@ -135,6 +139,12 @@ class DownloadThread(QThread):
                 for file_path in downloads_dir.glob(f"*{game_title_clean}*{ext}"):
                     if file_path.exists():
                         print(f"Найден существующий файл: {file_path}")
+                        if file_path.suffix.lower() == '.7z':
+                            extracted = self._extract_if_needed([file_path])
+                            if extracted:
+                                self.game.local_path = extracted[0]
+                        else:
+                            self.game.local_path = str(file_path)
                         return True
                         
             # Проверяем по ID игры, если есть
@@ -143,6 +153,12 @@ class DownloadThread(QThread):
                     for file_path in downloads_dir.glob(f"*{self.game.id}*{ext}"):
                         if file_path.exists():
                             print(f"Найден существующий файл по ID: {file_path}")
+                            if file_path.suffix.lower() == '.7z':
+                                extracted = self._extract_if_needed([file_path])
+                                if extracted:
+                                    self.game.local_path = extracted[0]
+                            else:
+                                self.game.local_path = str(file_path)
                             return True
                             
             return False
@@ -192,3 +208,24 @@ class DownloadThread(QThread):
             print(f"Ошибка распаковки архива: {e}")
             
         return extracted_files
+
+    def _parse_file_size(self, size_str: str) -> int:
+        """Преобразовать строку размера файла в байты."""
+        import re
+        if not size_str:
+            return 0
+
+        bytes_match = re.search(r"([\d,.]+)\s*bytes", size_str, re.I)
+        if bytes_match:
+            try:
+                return int(bytes_match.group(1).replace(',', ''))
+            except ValueError:
+                pass
+
+        match = re.search(r"([\d,.]+)\s*(GB|MB|KB)", size_str, re.I)
+        if match:
+            number = float(match.group(1).replace(',', '.'))
+            unit = match.group(2).upper()
+            factor = {'GB': 1024**3, 'MB': 1024**2, 'KB': 1024}.get(unit, 1)
+            return int(number * factor)
+        return 0
