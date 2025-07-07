@@ -15,7 +15,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import List, Optional
+import os # For path manipulation
+from typing import List, Optional, Dict # Added Dict
+
+# Adjust Python path to include project root for wii_download_manager
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
 
 from PySide6.QtCore import (
     QEasingCurve,
@@ -1071,6 +1076,94 @@ class WiiUnifiedManager(QMainWindow):
                 self.manager_card.update_for_usb_game(flash_game)
         else:
             self.manager_card.clear_card()
+
+    def _on_manager_tab_changed(self, index: int):
+        """Called when the user switches tabs in the Manager section."""
+        self.manager_card.clear_card() # Clear card details
+        if index == 0: # Local files tab
+            self._refresh_downloaded_games_list()
+            if self.list_downloaded_games.count() > 0 and self.list_downloaded_games.item(0).flags() & Qt.ItemIsSelectable:
+                self.list_downloaded_games.setCurrentRow(0)
+        elif index == 1: # USB games tab
+            if ENHANCED_DRIVE_AVAILABLE and self.current_usb_drive:
+                self._refresh_usb_games_list()
+                if self.list_usb_games.count() > 0 and self.list_usb_games.item(0).flags() & Qt.ItemIsSelectable:
+                    self.list_usb_games.setCurrentRow(0)
+            elif ENHANCED_DRIVE_AVAILABLE and not self.current_usb_drive:
+                 self.list_usb_games.clear()
+                 item = QListWidgetItem("USB диск не выбран для отображения игр.")
+                 item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+                 self.list_usb_games.addItem(item)
+
+
+    # --- Action Implementations for ManagerGameCard ---
+    def _action_install_to_usb(self, local_file_path: Optional[Path]):
+        if not local_file_path:
+            QMessageBox.warning(self, "Установка на USB", "Файл для установки не определен.")
+            return
+        if not self.current_usb_drive:
+            QMessageBox.warning(self, "Установка на USB", "USB диск не выбран.")
+            return
+
+        reply = QMessageBox.question(self, "Подтверждение установки",
+                                     f"Установить игру '{local_file_path.name}' на USB диск '{self.current_usb_drive.name}'?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self._start_copy_to_usb([local_file_path])
+
+    def _action_delete_local_file(self, local_file_path: Optional[Path]):
+        if not local_file_path:
+            QMessageBox.warning(self, "Удаление файла", "Файл для удаления не определен.")
+            return
+
+        reply = QMessageBox.question(self, "Подтверждение удаления",
+                                     f"Вы действительно хотите удалить локальный файл:\n{local_file_path}?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            try:
+                local_file_path.unlink()
+                QMessageBox.information(self, "Удаление успешно", f"Файл '{local_file_path.name}' удален.")
+                self._refresh_downloaded_games_list()
+                self.manager_card.clear_card()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка удаления", f"Не удалось удалить файл: {e}")
+
+    def _action_delete_from_usb(self, flash_game: Optional[FlashGame]):
+        if not flash_game:
+            QMessageBox.warning(self, "Удаление с USB", "Игра для удаления с USB не определена.")
+            return
+        if not self.current_usb_drive: # Should not happen if button is enabled
+            QMessageBox.warning(self, "Удаление с USB", "USB диск не выбран.")
+            return
+
+        reply = QMessageBox.question(self, "Подтверждение удаления с USB",
+                                     f"Вы действительно хотите удалить игру '{flash_game.display_title}'\nс USB диска '{self.current_usb_drive.name}'?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            try:
+                if hasattr(flash_game, 'delete') and callable(flash_game.delete):
+                    flash_game.delete() # Assuming FlashGame has a delete method
+                    QMessageBox.information(self, "Удаление успешно", f"Игра '{flash_game.display_title}' удалена с USB.")
+                    self._refresh_usb_games_list()
+                    self.manager_card.clear_card()
+                else:
+                    raise NotImplementedError("Метод delete() отсутствует у объекта игры на флешке.")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка удаления с USB", f"Не удалось удалить игру с USB: {e}")
+
+    def _action_import_external_to_usb(self):
+        if not self.current_usb_drive:
+            QMessageBox.warning(self, "Импорт на USB", "USB диск не выбран для импорта.")
+            return
+
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, "Выберите файлы игр для импорта на USB", "",
+            "Файлы игр (*.wbfs *.iso *.rvz *.wad);;Все файлы (*)"
+        )
+        if file_paths:
+            paths_to_copy = [Path(fp) for fp in file_paths]
+            self._start_copy_to_usb(paths_to_copy)
+
 
     # ------------------------------------------------------------------
     def _connect_signals(self):
