@@ -98,7 +98,7 @@ class WiiGameSeleniumDownloader:
             logger.error(f"Ошибка при попытке начать загрузку: {e}")
             return False
     
-    def monitor_download_progress(self, filepath: Path):
+    def monitor_download_progress(self, filepath: Path, total_size_bytes: Optional[int] = None):
         """Мониторинг прогресса загрузки"""
         last_size = 0
         stall_count = 0
@@ -110,11 +110,9 @@ class WiiGameSeleniumDownloader:
                 if current_size > last_size:
                     # Загрузка идет
                     if self.progress_callback:
-                        # Конвертируем байты в мегабайты
-                        current_mb = current_size / (1024 * 1024)
-                        # Предполагаем размер файла около 4 ГБ для расчета прогресса
-                        estimated_total_mb = 4 * 1024  # 4 ГБ в МБ
-                        self.progress_callback(current_mb, estimated_total_mb)
+                        downloaded = current_size
+                        total = total_size_bytes if total_size_bytes else 0
+                        self.progress_callback(downloaded, total)
                     
                     last_size = current_size
                     stall_count = 0
@@ -131,8 +129,9 @@ class WiiGameSeleniumDownloader:
                 logger.error(f"Ошибка при мониторинге загрузки: {e}")
                 break
     
-    def download_game(self, game_url: str, game_title: str, 
-                     progress_callback: Optional[Callable[[float, float], None]] = None) -> bool:
+    def download_game(self, game_url: str, game_title: str,
+                     progress_callback: Optional[Callable[[float, float], None]] = None,
+                     total_size_bytes: Optional[int] = None) -> bool:
         """
         Загрузка игры
         
@@ -146,6 +145,7 @@ class WiiGameSeleniumDownloader:
         """
         self.should_stop = False
         self.progress_callback = progress_callback
+        total_size = total_size_bytes
         
         try:
             # Настройка драйвера
@@ -173,8 +173,8 @@ class WiiGameSeleniumDownloader:
                         
                         # Запускаем мониторинг в отдельном потоке
                         monitor_thread = threading.Thread(
-                            target=self.monitor_download_progress, 
-                            args=(filepath,)
+                            target=self.monitor_download_progress,
+                            args=(filepath, total_size)
                         )
                         monitor_thread.start()
                         

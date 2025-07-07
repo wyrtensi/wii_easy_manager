@@ -92,11 +92,17 @@ class GameCard(QWidget):
         self._progress = QProgressBar()
         self._progress.hide()
 
+        # ─── скорость и оставшееся время
+        self._speed_label = QLabel("")
+        self._speed_label.setAlignment(Qt.AlignCenter)
+        self._speed_label.hide()
+
         lay = QVBoxLayout(self)
         lay.addWidget(self._title)
         lay.addWidget(self._cover, alignment=Qt.AlignCenter)
         lay.addWidget(self._btn_dl, alignment=Qt.AlignCenter)
         lay.addWidget(self._progress)
+        lay.addWidget(self._speed_label)
         lay.addWidget(self._desc)
 
         # Connect signals
@@ -104,6 +110,8 @@ class GameCard(QWidget):
         queue.download_started.connect(self._on_dl_start)
         queue.download_finished.connect(self._on_dl_finish)
         queue.progress_changed.connect(self._on_progress)
+        if hasattr(queue, 'speed_updated'):
+            queue.speed_updated.connect(self._on_speed_update)
 
         self._game: Optional[WiiGame] = None
 
@@ -139,12 +147,19 @@ class GameCard(QWidget):
     def _on_dl_finish(self, g: WiiGame):
         if self._game and g.title == self._game.title:
             self._progress.hide()
+            self._speed_label.hide()
             self._refresh_btn()
 
     @Slot(WiiGame, int)
     def _on_progress(self, g: WiiGame, percent: int):
         if self._game and g.title == self._game.title:
             self._progress.setValue(percent)
+
+    @Slot(WiiGame, float, str)
+    def _on_speed_update(self, g: WiiGame, speed: float, eta: str):
+        if self._game and g.title == self._game.title:
+            self._speed_label.setText(f"⚡ {speed:.1f} МБ/с | ⏱️ {eta}")
+            self._speed_label.show()
 
     # ------------------------------------------------------------------
     def update_game(self, game: WiiGame):
@@ -240,8 +255,27 @@ class WiiUnifiedManager(QMainWindow):
         self.setStatusBar(self.status)
         self.status.showMessage("Готов к работе 🔋")
 
+        self._download_items = {}
+        self._refresh_downloads()
+
         self._games: List[WiiGame] = []
         self._connect_signals()
+
+    def _refresh_downloads(self):
+        from pathlib import Path
+        downloads = Path("downloads")
+        downloads.mkdir(exist_ok=True)
+        self.list_downloads.clear()
+        for pattern in ("*.iso", "*.wbfs", "*.rvz"):
+            for f in downloads.glob(pattern):
+                status = "📥"
+                from pathlib import Path
+                flash_dir = Path("wbfs")
+                if (flash_dir / f.stem).exists():
+                    status = "💾"
+                item = QListWidgetItem(f"{status} {f.name}")
+                self.list_downloads.addItem(item)
+                self._download_items[f.stem] = item
 
     # ------------------------------------------------------------------
     def _build_search_page(self) -> QWidget:
@@ -268,10 +302,26 @@ class WiiUnifiedManager(QMainWindow):
     # ------------------------------------------------------------------
     def _build_manager_page(self) -> QWidget:
         page = QWidget()
-        label = QLabel("💾 Функции менеджера флешки появятся здесь…")
-        label.setAlignment(Qt.AlignCenter)
-        QVBoxLayout(page).addWidget(label)
+        layout = QVBoxLayout(page)
+
+        self.list_downloads = QListWidget()
+        layout.addWidget(QLabel("📥 Скачанные игры:"))
+        layout.addWidget(self.list_downloads)
+
         return page
+
+    def _add_download_item(self, game: WiiGame):
+        item = QListWidgetItem(f"⬇️ {game.title} (0%)")
+        self.list_downloads.addItem(item)
+        self._download_items[game.title] = item
+
+    def _update_download_progress(self, game: WiiGame, percent: int):
+        item = self._download_items.get(game.title)
+        if item:
+            item.setText(f"⬇️ {game.title} ({percent}%)")
+
+    def _on_download_finished(self, game: WiiGame):
+        self._refresh_downloads()
 
     # ------------------------------------------------------------------
     def _connect_signals(self):
@@ -285,6 +335,9 @@ class WiiUnifiedManager(QMainWindow):
         self.queue.queue_changed.connect(lambda n: self.status.showMessage(f"Очередь: {n} игр"))
         self.queue.download_started.connect(lambda g: self.status.showMessage(f"⬇️ Скачивание: {g.title}…"))
         self.queue.download_finished.connect(lambda g: self.status.showMessage(f"✅ Завершено: {g.title}"))
+        self.queue.progress_changed.connect(self._update_download_progress)
+        self.queue.download_started.connect(self._add_download_item)
+        self.queue.download_finished.connect(self._on_download_finished)
 
     # ------------------------------------------------------------------
     def _switch_page(self, page: QWidget, btn: QPushButton):

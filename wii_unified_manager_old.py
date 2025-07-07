@@ -2884,7 +2884,10 @@ class DownloadThread(QThread):
                 self.progress_updated.emit(downloaded, total, speed, eta_str, size_str)
                     
             success = self.downloader.download_game(
-                self.game_url, self.game_title, progress_callback
+                self.game_url,
+                self.game_title,
+                progress_callback,
+                None,
             )
             
             if success:

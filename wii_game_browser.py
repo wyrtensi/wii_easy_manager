@@ -283,9 +283,10 @@ class DownloadThread(QThread):
         
         try:
             success = self.downloader.download_game(
-                self.game_url, 
+                self.game_url,
                 self.game_title,
-                progress_callback
+                progress_callback,
+                total_size_bytes=None
             )
             
             if success:

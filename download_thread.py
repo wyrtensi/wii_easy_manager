@@ -65,9 +65,11 @@ class DownloadThread(QThread):
                 from wii_game_parser import WiiGameParser
                 parser = WiiGameParser()
                 detailed_game = parser.parse_game_details_from_url(self.game.detail_url)
-                
+
                 if detailed_game and hasattr(detailed_game, 'download_url') and detailed_game.download_url:
                     self.game.download_url = detailed_game.download_url
+                    if hasattr(detailed_game, 'file_size'):
+                        self.game.file_size = detailed_game.file_size
                 else:
                     self.download_finished.emit(False, "Не удалось получить URL для скачивания")
                     return
@@ -78,12 +80,17 @@ class DownloadThread(QThread):
                 return
             
             # Начинаем скачивание
+            total_bytes = None
+            if hasattr(self.game, 'file_size') and self.game.file_size:
+                total_bytes = self._size_str_to_bytes(self.game.file_size)
+
             success = self.downloader.download_game(
                 self.game.detail_url,  # URL страницы игры
                 self.game.title,       # Название игры
                 game_id=getattr(self.game, 'id', None),  # ID игры
                 progress_callback=progress_callback,      # Callback для прогресса
-                stop_callback=lambda: self.should_stop   # Callback для остановки
+                stop_callback=lambda: self.should_stop,   # Callback для остановки
+                total_size_bytes=total_bytes
             )
             
             if success:
@@ -92,8 +99,10 @@ class DownloadThread(QThread):
                     # Проверяем, нужно ли распаковать архив
                     extracted_files = self._extract_if_needed(files)
                     if extracted_files:
+                        self.game.extracted_files = extracted_files
                         self.download_finished.emit(True, f"Игра '{self.game.title}' успешно скачана и распакована!")
                     else:
+                        self.game.extracted_files = files
                         self.download_finished.emit(True, f"Игра '{self.game.title}' успешно скачана!")
                 else:
                     self.download_finished.emit(False, "Файл не найден после загрузки")
@@ -115,6 +124,26 @@ class DownloadThread(QThread):
             minutes = int((seconds % 3600) / 60)
             return f"{hours}ч {minutes}м"
 
+    def _size_str_to_bytes(self, size_str: str) -> int:
+        """Convert file size like '3.7 GB' to bytes."""
+        if not size_str:
+            return 0
+        s = size_str.upper().strip()
+        try:
+            if 'GB' in s:
+                val = float(s.replace('GB', '').strip()) * 1024 * 1024 * 1024
+            elif 'MB' in s:
+                val = float(s.replace('MB', '').strip()) * 1024 * 1024
+            elif 'KB' in s:
+                val = float(s.replace('KB', '').strip()) * 1024
+            else:
+                import re
+                m = re.search(r'(\d+(?:\.\d+)?)', s)
+                val = float(m.group(1)) if m else 0
+            return int(val)
+        except Exception:
+            return 0
+
     def stop(self):
         """Остановка загрузки"""
         self.should_stop = True
@@ -135,6 +164,10 @@ class DownloadThread(QThread):
                 for file_path in downloads_dir.glob(f"*{game_title_clean}*{ext}"):
                     if file_path.exists():
                         print(f"Найден существующий файл: {file_path}")
+                        if ext == '.7z':
+                            self.game.extracted_files = self._extract_if_needed([file_path])
+                        else:
+                            self.game.extracted_files = [str(file_path)]
                         return True
                         
             # Проверяем по ID игры, если есть
@@ -143,6 +176,10 @@ class DownloadThread(QThread):
                     for file_path in downloads_dir.glob(f"*{self.game.id}*{ext}"):
                         if file_path.exists():
                             print(f"Найден существующий файл по ID: {file_path}")
+                            if ext == '.7z':
+                                self.game.extracted_files = self._extract_if_needed([file_path])
+                            else:
+                                self.game.extracted_files = [str(file_path)]
                             return True
                             
             return False
