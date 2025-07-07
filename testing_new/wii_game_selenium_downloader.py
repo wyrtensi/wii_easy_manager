@@ -9,6 +9,7 @@ import os
 import time
 import logging
 import threading
+import requests # For HEAD request
 from typing import Optional, Callable
 from pathlib import Path
 from selenium import webdriver
@@ -19,19 +20,17 @@ from selenium.webdriver.support import expected_conditions as EC
 
 logger = logging.getLogger(__name__)
 
-
 class WiiGameSeleniumDownloader:
     """Класс для загрузки игр Wii с использованием Selenium"""
-    
+
     def __init__(self, download_dir: str = "downloads"):
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(exist_ok=True)
         self.cancel_url = "https://dl3.vimm.net/download/cancel.php"
         self.driver = None
-        self.download_thread = None
-        self.progress_callback = None
-        self.should_stop = False
-        
+        self.progress_callback: Optional[Callable[[int, int, float, str], None]] = None # bytes, total_bytes, speed, eta
+        self.should_stop = False # Internal flag, primarily set by stop_download()
+
     def setup_driver(self):
         """Настройка Chrome WebDriver"""
         chrome_options = Options()
@@ -41,202 +40,306 @@ class WiiGameSeleniumDownloader:
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True
         })
+        # chrome_options.add_argument("--headless") # Optional: run headless
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        
+
         try:
             self.driver = webdriver.Chrome(options=chrome_options)
             logger.info("Chrome WebDriver успешно инициализирован")
             return True
         except Exception as e:
             logger.error(f"Ошибка инициализации Chrome WebDriver: {e}")
+            self.driver = None # Ensure driver is None on failure
             return False
-    
+
     def cleanup_downloads(self):
-        """Очистка папки загрузок"""
+        """Очистка файлов .crdownload из папки загрузок."""
         try:
-            for file in self.download_dir.glob("*"):
+            for file in self.download_dir.glob("*.crdownload"):
                 if file.is_file():
                     file.unlink()
-            logger.info("Папка загрузок очищена")
+            logger.info("Файлы .crdownload очищены из папки загрузок.")
         except Exception as e:
-            logger.warning(f"Ошибка при очистке папки загрузок: {e}")
-    
+            logger.warning(f"Ошибка при очистке файлов .crdownload: {e}")
+
     def try_start_download(self, game_url: str) -> bool:
-        """Попытка начать загрузку игры"""
+        """Попытка начать загрузку игры."""
         try:
             if not self.driver:
+                logger.error("WebDriver не инициализирован.")
                 return False
-                
+
             self.driver.get(game_url)
-            time.sleep(2)
-            
-            # Ищем кнопку скачивания
-            try:
-                button = self.driver.find_element(By.XPATH, "//form[@id='dl_form']/button")
-                button.click()
-                logger.info("Кнопка скачивания нажата")
-            except Exception as e:
-                logger.warning(f"Не удалось найти кнопку скачивания: {e}")
-                return False
-            
-            # Ждем начала загрузки до 10 секунд
-            for _ in range(10):
-                if self.should_stop:
-                    return False
-                    
+            # Wait for page to load, specifically for the download button
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//form[@id='dl_form']/button"))
+            )
+
+            button = self.driver.find_element(By.XPATH, "//form[@id='dl_form']/button")
+            button.click()
+            logger.info("Кнопка скачивания нажата.")
+
+            # Wait for .crdownload file to appear
+            time.sleep(1) # Initial small delay
+            for _ in range(15): # Wait up to 15 seconds for .crdownload
+                if self.should_stop: return False
                 files = list(self.download_dir.glob("*.crdownload"))
                 if files:
                     logger.info(f"Загрузка началась: {files[0].name}")
                     return True
                 time.sleep(1)
-            
+
+            logger.warning(".crdownload файл не появился после нажатия кнопки.")
             return False
-            
+
         except Exception as e:
-            logger.error(f"Ошибка при попытке начать загрузку: {e}")
+            logger.error(f"Ошибка при попытке начать загрузку ({game_url}): {e}")
             return False
-    
-    def monitor_download_progress(self, filepath: Path):
-        """Мониторинг прогресса загрузки"""
+
+    def monitor_download_progress(self, filepath: Path, initial_total_size_gb: float = 4.0, should_stop_external_check: Optional[Callable[[], bool]] = None):
+        logger.info(f"Starting to monitor {filepath.name}. External stop check: {should_stop_external_check is not None}")
         last_size = 0
         stall_count = 0
-        
-        while filepath.exists() and not self.should_stop:
+        estimated_total_bytes = int(initial_total_size_gb * (1024**3))
+        start_time = time.time()
+        last_progress_call_time = time.time()
+
+        while filepath.exists(): # Loop while .crdownload file exists
+            time.sleep(0.25)
+
+            if self.should_stop:
+                logger.info(f"Internal stop signal for {filepath.name}.")
+                break
+            if should_stop_external_check and should_stop_external_check():
+                logger.info(f"External stop signal for {filepath.name}.")
+                self.stop_download() # Trigger internal stop
+                break
+
             try:
                 current_size = filepath.stat().st_size
-                
-                if current_size > last_size:
-                    # Загрузка идет
-                    if self.progress_callback:
-                        # Конвертируем байты в мегабайты
-                        current_mb = current_size / (1024 * 1024)
-                        # Предполагаем размер файла около 4 ГБ для расчета прогресса
-                        estimated_total_mb = 4 * 1024  # 4 ГБ в МБ
-                        self.progress_callback(current_mb, estimated_total_mb)
-                    
-                    last_size = current_size
+                now = time.time()
+
+                if current_size > last_size :
                     stall_count = 0
-                else:
-                    # Загрузка остановилась
+                    if self.progress_callback and (now - last_progress_call_time >= 1.0):
+                        elapsed_time_total = now - start_time
+                        speed_bps = current_size / elapsed_time_total if elapsed_time_total > 0 else 0
+                        speed_mbps = speed_bps / (1024**2)
+
+                        eta_seconds = float('inf')
+                        if speed_bps > 0 and estimated_total_bytes > current_size :
+                            eta_seconds = (estimated_total_bytes - current_size) / speed_bps
+
+                        eta_str = self.format_time(eta_seconds)
+                        self.progress_callback(current_size, estimated_total_bytes, speed_mbps, eta_str)
+                        last_progress_call_time = now
+                    last_size = current_size
+                elif current_size == last_size:
                     stall_count += 1
-                    if stall_count > 30:  # 30 секунд без изменений
-                        logger.warning("Загрузка остановилась, возможно нужно перезапустить")
+                    if stall_count * 0.25 > 120:  # Stalled for 120 seconds (2 minutes)
+                        logger.warning(f"Download {filepath.name} stalled for 120 seconds. Stopping.")
+                        self.stop_download()
                         break
-                
-                time.sleep(1)
-                
+                else:
+                    logger.warning(f"File size decreased for {filepath.name}. current: {current_size}, last: {last_size}")
+                    last_size = current_size
+
+            except FileNotFoundError:
+                logger.info(f"File {filepath.name} disappeared during monitoring (completed or cancelled).")
+                break # Exit loop if file is gone
             except Exception as e:
-                logger.error(f"Ошибка при мониторинге загрузки: {e}")
+                logger.error(f"Error monitoring {filepath.name}: {e}")
                 break
-    
-    def download_game(self, game_url: str, game_title: str, 
-                     progress_callback: Optional[Callable[[float, float], None]] = None) -> bool:
-        """
-        Загрузка игры
-        
-        Args:
-            game_url: URL страницы игры
-            game_title: Название игры для логов
-            progress_callback: Функция обратного вызова для отображения прогресса
-        
-        Returns:
-            True если загрузка успешна, False иначе
-        """
+
+        logger.info(f"Monitoring finished for {filepath.name}. should_stop={self.should_stop}")
+
+        # Final progress update if download seems completed
+        if self.progress_callback:
+            final_file_name = filepath.stem # Name without .crdownload
+            final_file = self.download_dir / final_file_name
+            if final_file.exists() and not self.should_stop : # If final file exists and not stopped
+                final_size = final_file.stat().st_size
+                logger.info(f"Download completed for {final_file_name}, final size {final_size}. Emitting 100%.")
+                self.progress_callback(final_size, final_size, 0, "0 сек")
+            elif self.should_stop: # If stopped
+                 logger.info(f"Download was stopped for {filepath.name}. Emitting last known progress or 0%.")
+                 self.progress_callback(last_size, estimated_total_bytes, 0, "Отменено")
+            else: # .crdownload gone but no final file, and not explicitly stopped (could be error)
+                 logger.info(f"Download of {filepath.name} likely failed or was externally removed. Emitting last known progress.")
+                 self.progress_callback(last_size, estimated_total_bytes, 0, "Ошибка")
+
+
+    def format_time(self, seconds: float) -> str:
+        if seconds == float('inf') or seconds < 0:
+            return "..."
+        if seconds < 60:
+            return f"{int(seconds)} сек"
+        elif seconds < 3600:
+            minutes = int(seconds / 60)
+            secs = int(seconds % 60)
+            return f"{minutes} мин {secs} сек"
+        else:
+            hours = int(seconds / 3600)
+            minutes = int((seconds % 3600) / 60)
+            return f"{hours} ч {minutes} мин"
+
+    def download_game(self, game_url: str, game_title: str,
+                     progress_callback: Optional[Callable[[int, int, float, str], None]] = None,
+                     should_stop_external_check: Optional[Callable[[], bool]] = None) -> bool:
         self.should_stop = False
         self.progress_callback = progress_callback
-        
-        try:
-            # Настройка драйвера
-            if not self.setup_driver():
-                return False
-            
-            # Очистка папки загрузок
-            self.cleanup_downloads()
-            
-            logger.info(f"Попытка загрузить игру: {game_title}")
-            
-            # Цикл до успешной загрузки
-            max_attempts = 5
-            for attempt in range(max_attempts):
-                if self.should_stop:
-                    break
-                    
-                logger.info(f"Попытка {attempt + 1} из {max_attempts}")
-                
-                if self.try_start_download(game_url):
-                    # Загрузка началась, ищем файл
-                    crdownload_files = list(self.download_dir.glob("*.crdownload"))
-                    if crdownload_files:
-                        filepath = crdownload_files[0]
-                        
-                        # Запускаем мониторинг в отдельном потоке
-                        monitor_thread = threading.Thread(
-                            target=self.monitor_download_progress, 
-                            args=(filepath,)
-                        )
-                        monitor_thread.start()
-                        
-                        # Ждем завершения загрузки
-                        while filepath.exists() and not self.should_stop:
-                            time.sleep(1)
-                        
-                        monitor_thread.join()
-                        
-                        # Проверяем, что файл действительно скачался
-                        final_files = [f for f in self.download_dir.glob("*") 
-                                     if f.is_file() and not f.name.endswith('.crdownload')]
-                        
-                        if final_files:
-                            logger.info(f"Загрузка завершена: {final_files[0].name}")
-                            return True
-                        else:
-                            logger.warning("Загрузка не завершилась, пробуем снова")
-                
-                # Если не удалось, сбрасываем и пробуем снова
-                if attempt < max_attempts - 1:
-                    logger.info("Сбрасываем загрузку и пробуем снова...")
+
+        estimated_size_gb = 4.0
+        # Vimm.net game pages don't typically give direct file links or Content-Length before Selenium interaction.
+        # So, a pre-emptive HEAD request on game_url (HTML page) won't give file size.
+        # We rely on the default or could try to parse it from game details if available.
+
+        logger.info(f"Preparing to download {game_title} from {game_url}")
+
+        if not self.setup_driver():
+            if self.should_stop: logger.info("Driver setup aborted by stop request.")
+            return False
+
+        # self.cleanup_downloads() # Clean only .crdownload, not all files
+
+        max_attempts = 3 # Reduced attempts for faster failure if problematic
+        success = False
+        for attempt in range(max_attempts):
+            if self.should_stop or (should_stop_external_check and should_stop_external_check()):
+                logger.info(f"Download attempt {attempt + 1} for {game_title} aborted by stop signal.")
+                break
+
+            logger.info(f"Download attempt {attempt + 1}/{max_attempts} for {game_title}")
+
+            if self.try_start_download(game_url):
+                crdownload_files = list(self.download_dir.glob("*.crdownload"))
+                if crdownload_files:
+                    filepath = crdownload_files[0]
+                    logger.info(f"Monitoring {filepath.name} for {game_title}")
+
+                    # The monitoring will run until file is gone or stop is signaled
+                    self.monitor_download_progress(filepath, estimated_size_gb, should_stop_external_check)
+
+                    if self.should_stop: # If stop_download was called during monitor
+                        logger.info(f"Download of {game_title} was stopped.")
+                        success = False
+                        break # Exit attempts loop
+
+                    # Check if download completed (no .crdownload, final file exists)
+                    final_filename = filepath.stem # Filename without .crdownload
+                    final_filepath = self.download_dir / final_filename
+                    if final_filepath.exists():
+                        logger.info(f"Download completed successfully: {final_filename}")
+                        success = True
+                        break # Success, exit attempts loop
+                    else:
+                        logger.warning(f".crdownload for {game_title} disappeared, but final file not found. Assuming failure or cancellation.")
+                        success = False # Continue to next attempt if any
+                else:
+                    logger.warning(f"try_start_download succeeded for {game_title} but no .crdownload file found immediately after.")
+                    success = False
+            else: # try_start_download failed
+                success = False
+
+            if not success and attempt < max_attempts - 1 and not self.should_stop:
+                logger.info(f"Attempt {attempt + 1} failed for {game_title}. Retrying after delay...")
+                if self.driver:
                     try:
-                        self.driver.get(self.cancel_url)
+                        # Try to navigate away or refresh to reset state if possible
+                        self.driver.get("chrome://version")
                         time.sleep(2)
-                    except:
-                        pass
-            
-            logger.error(f"Не удалось загрузить игру после {max_attempts} попыток")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Ошибка при загрузке игры: {e}")
-            return False
-        
-        finally:
-            if self.driver:
-                try:
-                    self.driver.quit()
-                except:
-                    pass
-                self.driver = None
-    
-    def stop_download(self):
-        """Остановка загрузки"""
-        self.should_stop = True
-        
+                    except Exception as e_nav:
+                        logger.warning(f"Could not navigate away during retry prep: {e_nav}")
+                else: # If driver died, need to re-setup
+                    if not self.setup_driver(): break # Stop if can't re-setup
+                time.sleep(5) # Wait before retrying
+            elif self.should_stop:
+                break
+
         if self.driver:
             try:
-                self.driver.get(self.cancel_url)
-                time.sleep(1)
                 self.driver.quit()
-            except:
-                pass
-            self.driver = None
-        
-        logger.info("Загрузка остановлена")
-    
-    def get_downloaded_files(self) -> list:
-        """Получение списка скачанных файлов"""
+            except Exception as e:
+                logger.error(f"Error quitting driver: {e}")
+            finally:
+                self.driver = None
+
+        logger.info(f"Download process for {game_title} finished. Success: {success}, Internal stop flag: {self.should_stop}")
+        return success
+
+    def stop_download(self):
+        logger.info("stop_download called. Setting internal stop flag.")
+        self.should_stop = True
+        if self.driver:
+            logger.info("Attempting to close WebDriver to halt download.")
+            try:
+                # Navigating to cancel URL might not be effective if download is browser-native
+                # Closing the driver is more direct.
+                self.driver.quit()
+            except Exception as e:
+                logger.error(f"Error trying to quit driver in stop_download: {e}")
+            finally:
+                self.driver = None # Ensure it's cleared
+        else:
+            logger.info("No active WebDriver to stop.")
+
+    def get_downloaded_files(self) -> list[Path]:
+        """Получение списка скачанных (не .crdownload) файлов в папке загрузок."""
         try:
-            return [f for f in self.download_dir.glob("*") 
+            return [f for f in self.download_dir.glob("*")
                    if f.is_file() and not f.name.endswith('.crdownload')]
-        except:
+        except Exception as e:
+            logger.error(f"Error getting downloaded files: {e}")
             return []
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
+
+    # Basic test
+    downloader = WiiGameSeleniumDownloader(download_dir="test_selenium_downloads")
+
+    # Example: Need for Speed Carbon URL (replace with a valid game page from vimm.net)
+    # Ensure the game is small enough for a quick test or be prepared to wait/cancel.
+    test_game_url = "https://vimm.net/vault/17830" # Example: Animal Crossing (EUR) - relatively small
+    test_game_title = "Animal Crossing City Folk EUR"
+
+    def my_progress_callback(current_bytes, total_bytes, speed_mbps, eta_str):
+        percent = int((current_bytes/total_bytes)*100) if total_bytes > 0 else 0
+        print(f"Progress: {percent}% - {current_bytes/1024**2:.2f}MB / {total_bytes/1024**2:.2f}MB - Speed: {speed_mbps:.2f} MB/s - ETA: {eta_str}")
+
+    print(f"Starting test download for {test_game_title}...")
+
+    # Simulate external stop after 15 seconds for testing cancellation
+    stop_flag = False
+    def external_stop_check():
+        return stop_flag
+
+    #threading.Timer(15, lambda: setattr(downloader, 'should_stop', True)).start() # Stop via internal flag
+    # Or to test external_stop_check:
+    # def set_stop_true():
+    #     global stop_flag
+    #     print("EXTERNAL STOP SIGNAL SET")
+    #     stop_flag = True
+    # threading.Timer(25, set_stop_true).start()
+
+
+    success = downloader.download_game(test_game_url, test_game_title, my_progress_callback, external_stop_check)
+
+    if success:
+        print(f"Test download SUCCEEDED for {test_game_title}.")
+        files = downloader.get_downloaded_files()
+        print("Downloaded files:", [f.name for f in files])
+        # Clean up test file
+        # for f in files: os.remove(f)
+    else:
+        print(f"Test download FAILED or was CANCELLED for {test_game_title}.")
+
+    # Test cleanup of .crdownload (if any left)
+    # downloader.cleanup_downloads()
+    # if os.path.exists("test_selenium_downloads"):
+    #     import shutil
+    #     # shutil.rmtree("test_selenium_downloads")
+
+    print("Test finished.")

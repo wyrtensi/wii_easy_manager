@@ -101,4 +101,136 @@ def build_style() -> str:
         background-color: {WII_BLUE};
         border-radius: 8px;
     }}
+
+    /* Scroll Area */
+    QScrollArea {{
+        border: 1px solid {WII_GRAY};
+        border-radius: 12px;
+        background-color: {WII_WHITE};
+    }}
+    QScrollBar:vertical {{
+        border: none;
+        background: {WII_LIGHT_GRAY};
+        width: 14px;
+        margin: 15px 0 15px 0;
+        border-radius: 0px;
+    }}
+    QScrollBar::handle:vertical {{
+        background-color: {WII_BLUE};
+        min-height: 30px;
+        border-radius: 7px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background-color: {WII_GREEN};
+    }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        border: none;
+        background: none;
+        height: 0px;
+    }}
+    QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical {{
+        background: none;
+    }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+        background: none;
+    }}
+
+    /* Tab Widget */
+    QTabWidget::pane {{
+        border: 1px solid {WII_GRAY};
+        border-radius: 12px; /* Rounded corners for the pane */
+        background-color: {WII_WHITE};
+        padding: 5px;
+    }}
+    QTabBar::tab {{
+        background-color: {WII_LIGHT_GRAY};
+        color: {WII_BLUE};
+        border: 1px solid {WII_GRAY};
+        border-bottom: none;
+        padding: 10px 20px; /* Increased padding for larger tabs */
+        margin-right: 2px;
+        border-top-left-radius: 12px; /* More rounded tabs */
+        border-top-right-radius: 12px;
+        font-weight: bold;
+        font-size: 13pt; /* Slightly larger font for tabs */
+    }}
+    QTabBar::tab:selected {{
+        background-color: {WII_BLUE};
+        color: white;
+        border-color: {WII_BLUE};
+    }}
+    QTabBar::tab:hover {{
+        background-color: {WII_LIGHT_BLUE};
+        color: {WII_DARK_GRAY};
+    }}
+    QTabBar::tab:disabled {{
+        background-color: {WII_GRAY};
+        color: {WII_DARK_GRAY};
+    }}
+    QTabWidget::tab-bar {{
+        alignment: center;
+        left: 10px; /* Add some space from the left edge */
+    }}
+
+    /* ComboBox */
+    QComboBox {{
+        border: 2px solid {WII_GRAY};
+        border-radius: 10px;
+        padding: 5px 10px;
+        background-color: {WII_WHITE};
+        color: {WII_DARK_GRAY};
+        font-size: 12pt;
+        min-height: 28px; /* Ensure decent height */
+    }}
+    QComboBox:focus {{
+        border-color: {WII_BLUE};
+    }}
+    QComboBox::drop-down {{
+        subcontrol-origin: padding;
+        subcontrol-position: top right;
+        width: 20px;
+        border-left-width: 1px;
+        border-left-color: {WII_GRAY};
+        border-left-style: solid;
+        border-top-right-radius: 10px;
+        border-bottom-right-radius: 10px;
+        background: {WII_LIGHT_BLUE};
+    }}
+    QComboBox::down-arrow {{
+        /* Using a unicode character as a placeholder for an image */
+        /* image: url(./testing_new/down_arrow.png); */
+        width: 12px;
+        height: 12px;
+    }}
+    QComboBox QAbstractItemView {{ /* Style for the dropdown list */
+        border: 2px solid {WII_BLUE};
+        border-radius: 8px;
+        background-color: {WII_WHITE};
+        color: {WII_DARK_GRAY};
+        selection-background-color: {WII_LIGHT_BLUE};
+        padding: 5px;
+    }}
+
+    /* Danger Button Style */
+    QPushButton[danger="true"] {{
+        background-color: #EF5350; /* WII_RED */
+    }}
+    QPushButton[danger="true"]:hover {{
+        background-color: #D32F2F; /* Darker Red */
+    }}
+    QPushButton[danger="true"]:pressed {{
+        background-color: #B71C1C; /* Even Darker Red */
+    }}
+
+    /* Success Button Style (alternative to default blue for some actions) */
+    QPushButton[success="true"] {{
+        background-color: {WII_GREEN};
+    }}
+    QPushButton[success="true"]:hover {{
+        background-color: #4CAF50; /* Darker Green */
+    }}
+    QPushButton[success="true"]:pressed {{
+        background-color: #388E3C; /* Even Darker Green */
+    }}
+
     """
