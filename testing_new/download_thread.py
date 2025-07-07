@@ -27,6 +27,28 @@ class DownloadThread(QThread):
         self.start_time = None
         self.downloader = None
 
+    def _get_game_size_bytes(self) -> int:
+        """Преобразует строку размера файла в байты, если возможно"""
+        import re
+        size_str = getattr(self.game, 'file_size', '')
+        if not size_str:
+            return 0
+        try:
+            # Попытка найти часть вида "X.Y GB" или "NN MB"
+            match = re.search(r"([\d\.]+)\s*(GB|MB|KB|B)", size_str, re.I)
+            if match:
+                num = float(match.group(1))
+                unit = match.group(2).upper()
+                factor = {'B':1, 'KB':1024, 'MB':1024**2, 'GB':1024**3}
+                return int(num * factor.get(unit, 1))
+            # Или кусок "(NN bytes)"
+            match = re.search(r"(\d+)\s*bytes", size_str, re.I)
+            if match:
+                return int(match.group(1))
+        except Exception:
+            pass
+        return 0
+
     def run(self):
         """Запуск загрузки"""
         try:
@@ -73,7 +95,13 @@ class DownloadThread(QThread):
                     return
             
             # Проверяем, есть ли уже скачанный файл
-            if self._check_existing_file():
+            existing_files = self._check_existing_file()
+            if existing_files:
+                extracted = self._extract_if_needed(existing_files)
+                if extracted:
+                    self.game.local_path = str(extracted[0])
+                else:
+                    self.game.local_path = str(existing_files[0])
                 self.download_finished.emit(True, f"Игра '{self.game.title}' уже скачана!")
                 return
             
@@ -81,9 +109,10 @@ class DownloadThread(QThread):
             success = self.downloader.download_game(
                 self.game.detail_url,  # URL страницы игры
                 self.game.title,       # Название игры
-                game_id=getattr(self.game, 'id', None),  # ID игры
-                progress_callback=progress_callback,      # Callback для прогресса
-                stop_callback=lambda: self.should_stop   # Callback для остановки
+                game_id=getattr(self.game, 'id', None),
+                progress_callback=progress_callback,
+                stop_callback=lambda: self.should_stop,
+                total_bytes=self._get_game_size_bytes()
             )
             
             if success:
@@ -91,6 +120,9 @@ class DownloadThread(QThread):
                 if files:
                     # Проверяем, нужно ли распаковать архив
                     extracted_files = self._extract_if_needed(files)
+                    final_list = extracted_files if extracted_files else files
+                    if final_list:
+                        self.game.local_path = str(final_list[0])
                     if extracted_files:
                         self.download_finished.emit(True, f"Игра '{self.game.title}' успешно скачана и распакована!")
                     else:
@@ -121,35 +153,30 @@ class DownloadThread(QThread):
         if self.downloader and hasattr(self.downloader, 'stop_download'):
             self.downloader.stop_download()
 
-    def _check_existing_file(self) -> bool:
-        """Проверяет, есть ли уже скачанный файл"""
+    def _check_existing_file(self) -> list:
+        """Возвращает список существующих файлов игры если они есть"""
+        files_found = []
         try:
             from pathlib import Path
             downloads_dir = Path("downloads")
-            
-            # Ищем файлы игры по названию
+
             game_title_clean = "".join(c for c in self.game.title if c.isalnum() or c in (' ', '-', '_')).strip()
-            
-            # Проверяем различные форматы файлов
+
             for ext in ['.iso', '.wbfs', '.rvz', '.7z']:
                 for file_path in downloads_dir.glob(f"*{game_title_clean}*{ext}"):
                     if file_path.exists():
-                        print(f"Найден существующий файл: {file_path}")
-                        return True
-                        
-            # Проверяем по ID игры, если есть
-            if hasattr(self.game, 'id') and self.game.id:
+                        files_found.append(file_path)
+
+            if not files_found and hasattr(self.game, 'id') and self.game.id:
                 for ext in ['.iso', '.wbfs', '.rvz', '.7z']:
                     for file_path in downloads_dir.glob(f"*{self.game.id}*{ext}"):
                         if file_path.exists():
-                            print(f"Найден существующий файл по ID: {file_path}")
-                            return True
-                            
-            return False
-            
+                            files_found.append(file_path)
+
         except Exception as e:
             print(f"Ошибка проверки существующих файлов: {e}")
-            return False
+
+        return files_found
 
     def _extract_if_needed(self, downloaded_files) -> list:
         """Извлекает архивы, если необходимо"""

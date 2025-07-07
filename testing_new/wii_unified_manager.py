@@ -557,6 +557,7 @@ class WiiUnifiedManager(QMainWindow):
         self._games: List[WiiGame] = []
         self._flash_games = []  # Список игр с флешки
         self.current_drive = None  # Текущая выбранная флешка
+        self.download_items = {}
         self._connect_signals()
         
         # Подключаем сигнал поиска
@@ -629,12 +630,12 @@ class WiiUnifiedManager(QMainWindow):
 
         # Main content area with splitter
         splitter = QSplitter(Qt.Horizontal)
-        
-        # Left side - games list
+
+        # Left side - games list (flash)
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        
-        # Search for downloaded games
+
+        # Search for downloaded games on flash drive
         search_layout = QHBoxLayout()
         search_label = QLabel("🔍 Поиск:")
         self.flash_search = QLineEdit()
@@ -642,11 +643,18 @@ class WiiUnifiedManager(QMainWindow):
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.flash_search)
         left_layout.addLayout(search_layout)
-        
-        # Games list
+
+        # Games list on flash drive
         self.list_flash_games = QListWidget()
         self.list_flash_games.setMinimumWidth(300)
         left_layout.addWidget(self.list_flash_games, 1)
+
+        # List of downloaded games
+        self.list_downloaded_games = QListWidget()
+        self.list_downloaded_games.setMinimumWidth(300)
+        self.list_downloaded_games.setStyleSheet("font-size:12pt")
+        left_layout.addWidget(QLabel("⬇️ Скачанные игры:"))
+        left_layout.addWidget(self.list_downloaded_games, 1)
         
         # Action buttons
         buttons_layout = QVBoxLayout()
@@ -713,6 +721,10 @@ class WiiUnifiedManager(QMainWindow):
             self.queue.queue_changed.connect(lambda n: self.status.showMessage(f"Очередь: {n} игр"))
             self.queue.download_started.connect(lambda g: self.status.showMessage(f"⬇️ Скачивание: {g.title}…"))
             self.queue.download_finished.connect(lambda g: self.status.showMessage(f"✅ Завершено: {g.title}"))
+
+            self.queue.download_started.connect(self._on_queue_started)
+            self.queue.progress_changed.connect(self._on_queue_progress)
+            self.queue.download_finished.connect(self._on_queue_finished)
             
             # Подключаем сигналы для обновления информации о загрузках
             self.queue.queue_changed.connect(self._update_downloads_info)
@@ -751,6 +763,24 @@ class WiiUnifiedManager(QMainWindow):
                 self.downloads_info.setStyleSheet("font-size:12pt;color:#66BB6A;font-weight:bold;")
         except Exception as e:
             print(f"Ошибка обновления информации о загрузках: {e}")
+
+    # ------------------------------------------------------------------
+    def _on_queue_started(self, game: WiiGame):
+        item = QListWidgetItem(f"⬇️ {game.title} - 0%")
+        self.download_items[game.title] = item
+        self.list_downloaded_games.addItem(item)
+
+    def _on_queue_progress(self, game: WiiGame, percent: int):
+        item = self.download_items.get(game.title)
+        if item:
+            item.setText(f"⬇️ {game.title} - {percent}%")
+
+    def _on_queue_finished(self, game: WiiGame):
+        item = self.download_items.get(game.title)
+        if item:
+            prefix = "✅" if self._is_game_on_flash(game) else "⬇️"
+            item.setText(f"{prefix} {game.title}")
+        self._update_downloaded_status()
 
     # ------------------------------------------------------------------
     def _flash_game_selected(self, row: int):
@@ -849,6 +879,7 @@ class WiiUnifiedManager(QMainWindow):
         try:
             self._flash_games = self.current_drive.get_games()
             self._update_flash_games_list()
+            self._update_downloaded_status()
             
             games_info = self.current_drive.get_games_info()
             self.status.showMessage(
@@ -888,6 +919,25 @@ class WiiUnifiedManager(QMainWindow):
         
         # Сбрасываем выбор карточки
         self.flash_card.update_game(None)
+
+    def _is_game_on_flash(self, game: WiiGame) -> bool:
+        """Проверка, установлена ли игра на флешке"""
+        for g in self._flash_games:
+            if hasattr(game, 'id') and g.id == game.id:
+                return True
+            if g.display_title.lower() == game.title.lower():
+                return True
+        return False
+
+    def _update_downloaded_status(self):
+        """Обновляет метки скачанных игр в списке"""
+        for title, item in self.download_items.items():
+            dummy = WiiGame(title=title)
+            prefix = "✅" if self._is_game_on_flash(dummy) else "⬇️"
+            if '%' in item.text():
+                # still downloading
+                continue
+            item.setText(f"{prefix} {title}")
 
     def _action_add_external_to_usb(self):
         """Добавить внешние игры на флешку"""

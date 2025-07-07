@@ -200,9 +200,10 @@ class WiiGameSeleniumDownloader:
 
 
     def download_game(self, game_url: str, game_title: str,
-                     game_id: Optional[str] = None, # Added game_id, optional
-                     progress_callback: Optional[Callable[..., None]] = None, # General signature
-                     stop_callback: Optional[Callable[[], bool]] = None) -> bool: # Added stop_callback
+                     game_id: Optional[str] = None,
+                     progress_callback: Optional[Callable[..., None]] = None,
+                     stop_callback: Optional[Callable[[], bool]] = None,
+                     total_bytes: Optional[int] = None) -> bool:
         """
         Загрузка игры
 
@@ -221,9 +222,8 @@ class WiiGameSeleniumDownloader:
         self.progress_callback = progress_callback
         self.external_stop_callback = stop_callback
 
-        # TODO: Need a way to get game_total_size_bytes, perhaps from game object if available via game_id
-        # For now, this will be None, and percentage calculation will be basic or omitted in monitor.
-        game_total_size_bytes = None
+        # Размер файла, если известен. Может быть получен из метаданных игры.
+        game_total_size_bytes = total_bytes
         logger.info(f"Запрос на загрузку игры: {game_title} (ID: {game_id}), URL: {game_url}")
 
         try:
@@ -248,9 +248,7 @@ class WiiGameSeleniumDownloader:
                         filepath = crdownload_files[0]
                         logger.info(f"Файл загрузки: {filepath}")
 
-                        # For now, we don't have actual total size.
-                        # The progress_callback in DownloadThread expects (percent, speed, eta)
-                        # monitor_download_progress needs to be adapted to provide this.
+                        # Передаем известный размер файла в монитор загрузки
                         self.monitor_download_progress(filepath, game_total_size_bytes)
 
                         # Check conditions after monitor_download_progress finishes
