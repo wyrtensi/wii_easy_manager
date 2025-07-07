@@ -34,7 +34,8 @@ from PySide6.QtCore import (
     QSize,   # Already here
     QTimer   # Already here
 )
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import (QIcon, QPixmap, QAction, 
+) # Added QAction for menu actions
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -56,6 +57,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QMessageBox,
     QComboBox, # Added QComboBox
+    QFileDialog, # Added QFileDialog for file dialogs
 )
 # from PySide6.QtCore import QThread, Signal, QSize, QTimer # Moved up
 
@@ -797,7 +799,7 @@ class WiiUnifiedManager(QMainWindow):
         help_menu.addAction(about_action)
 
     def _action_export_to_json(self):
-        games_to_export = self.db.get_all_games()
+        games_to_export = self.db.games # Access games directly from the database
         if not games_to_export:
             QMessageBox.information(self, "Экспорт", "Нет игр в базе для экспорта.")
             return
@@ -1210,7 +1212,7 @@ class WiiUnifiedManager(QMainWindow):
         if ENHANCED_DRIVE_AVAILABLE:
             self.drive_combo.currentIndexChanged.connect(self._on_drive_selected)
             self.btn_refresh_drives.clicked.connect(self._refresh_drives_list)
-            # self.btn_import_external.clicked.connect(self._import_external_to_usb) # TODO: Implement
+            self.btn_import_external.clicked.connect(self._action_import_external_to_usb)
 
         self.list_downloaded_games.currentItemChanged.connect(self._on_local_game_selected_manager)
         self.list_usb_games.currentItemChanged.connect(self._on_usb_game_selected_manager)
@@ -1241,11 +1243,11 @@ class WiiUnifiedManager(QMainWindow):
         QMessageBox.information(self, "Загрузка завершена", f"Игра '{game.title}' скачана.")
 
 
-    def _on_actual_download_progress(self, game: WiiGame, percent: int):
+    def _on_actual_download_progress(self, game: WiiGame, percent: int, downloaded_bytes: float, total_bytes: float, speed_mbps: float, eta_str: str):
         # Status bar could show overall progress if multiple downloads were allowed
         # For now, card handles its own progress if it's the selected game
         if self.card._game and self.card._game.title == game.title:
-            self.card._on_progress_changed(game, percent) # Forward to card
+            self.card._on_progress_changed(game, percent, downloaded_bytes, total_bytes, speed_mbps, eta_str)
         # We could also update a progress bar in the list item itself if desired
 
     # ------------------------------------------------------------------
@@ -1263,7 +1265,7 @@ class WiiUnifiedManager(QMainWindow):
         """Загружает игры из локальной базы данных (JSON файла)."""
         self.status.showMessage("Загрузка игр из кеша...")
         self.db.load_database() # WiiGameDatabase handles the loading
-        cached_games = self.db.get_all_games() # Assuming a method to get all games
+        cached_games = self.db.games # Access games directly from the database
         self._populate_game_list(cached_games)
         if cached_games:
             self.status.showMessage(f"Загружено {len(cached_games)} игр из кеша.")
