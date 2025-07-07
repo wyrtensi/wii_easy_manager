@@ -169,11 +169,11 @@ class GameCard(QWidget):
         if self._game and g.title == self._game.title:
             self._progress.setValue(percent)
     
-    @Slot(WiiGame, float, str)
-    def _on_speed_update(self, g: WiiGame, speed: float, eta: str):
-        """Обновление информации о скорости и времени"""
+    @Slot(WiiGame, float, str, str)
+    def _on_speed_update(self, g: WiiGame, speed: float, eta: str, size: str):
+        """Обновление информации о скорости, времени и размере"""
         if self._game and g.title == self._game.title:
-            speed_text = f"⚡ {speed:.1f} МБ/с | ⏱️ {eta}"
+            speed_text = f"{size} | ⚡ {speed:.1f} МБ/с | ⏱️ {eta}"
             self._speed_label.setText(speed_text)
 
     # ------------------------------------------------------------------
@@ -725,9 +725,9 @@ class WiiUnifiedManager(QMainWindow):
         else:
             print("Warning: DownloadQueue not initialized when connecting signals.")
 
-    def _on_speed_update(self, game: WiiGame, speed: float, eta: str):
+    def _on_speed_update(self, game: WiiGame, speed: float, eta: str, size: str):
         """Обновление статуса с информацией о скорости"""
-        self.status.showMessage(f"⬇️ {game.title}: {speed:.1f} МБ/с, осталось {eta}")
+        self.status.showMessage(f"⬇️ {game.title}: {size} | {speed:.1f} МБ/с, осталось {eta}")
 
     def _update_downloads_info(self, *args):
         """Обновление информации о загрузках"""
