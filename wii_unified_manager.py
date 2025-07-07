@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QComboBox, QTextEdit, QSplitter, QTabWidget, QGroupBox,
     QProgressBar, QStatusBar, QMenuBar, QMenu, QFileDialog,
-    QMessageBox, QDialog, QDialogButtonBox, QFormLayout,
+    QMessageBox, QFormLayout,
     QCheckBox, QScrollArea, QFrame, QGridLayout, QStackedWidget,
     QToolButton, QButtonGroup, QSpacerItem, QSizePolicy
 )
@@ -45,42 +45,43 @@ from wii_download_manager.models.enhanced_drive import EnhancedDrive as Drive, C
 from wii_download_manager.models.game import Game as FlashGame
 
 # Глобальные настройки стилей - светлая приятная тема
-WII_BLUE = "#4A90E2"
-WII_LIGHT_BLUE = "#B3D9FF"
+# Цвета интерфейса в более "детском" стиле
+WII_BLUE = "#5C8DF6"
+WII_LIGHT_BLUE = "#AED3FF"
 WII_WHITE = "#FFFFFF"
-WII_LIGHT_GRAY = "#F8F9FA"
-WII_GRAY = "#E9ECEF"
-WII_DARK_GRAY = "#6C757D"
-WII_GREEN = "#28A745"
-WII_ORANGE = "#FD7E14"
-WII_RED = "#DC3545"
-WII_YELLOW = "#FFC107"
+WII_LIGHT_GRAY = "#F7F7F7"
+WII_GRAY = "#E0E0E0"
+WII_DARK_GRAY = "#7A7A7A"
+WII_GREEN = "#3CC76B"
+WII_ORANGE = "#FFA03B"
+WII_RED = "#F35B5B"
+WII_YELLOW = "#FFD666"
 
 # Стили для интерфейса - светлая приятная тема в стиле Wii
 WII_STYLE = f"""
 QMainWindow {{
     background-color: {WII_LIGHT_GRAY};
     font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
-    font-size: 10pt;
+    font-size: 12pt;
 }}
 
 QWidget {{
     background-color: transparent;
     color: #212529;
-    font-size: 10pt;
+    font-size: 12pt;
 }}
 
 /* Основные кнопки */
 QPushButton {{
     background-color: {WII_WHITE};
     border: 2px solid {WII_BLUE};
-    border-radius: 8px;
-    padding: 8px 16px;
-    font-size: 11pt;
-    font-weight: 500;
+    border-radius: 15px;
+    padding: 12px 24px;
+    font-size: 14pt;
+    font-weight: 600;
     color: {WII_BLUE};
-    min-height: 24px;
-    min-width: 80px;
+    min-height: 40px;
+    min-width: 120px;
 }}
 
 QPushButton:hover {{
@@ -104,13 +105,13 @@ QPushButton:disabled {{
 QPushButton[nav="true"] {{
     background-color: {WII_WHITE};
     border: 2px solid {WII_BLUE};
-    border-radius: 12px;
-    padding: 12px 24px;
-    font-size: 14pt;
+    border-radius: 20px;
+    padding: 16px 32px;
+    font-size: 18pt;
     font-weight: bold;
     color: {WII_BLUE};
-    min-height: 40px;
-    min-width: 150px;
+    min-height: 60px;
+    min-width: 200px;
 }}
 
 QPushButton[nav="true"]:checked {{
@@ -125,11 +126,11 @@ QPushButton[nav="true"]:hover {{
 
 /* Поля ввода */
 QLineEdit {{
-    background-color: white;
+    background-color: {WII_WHITE};
     border: 2px solid {WII_GRAY};
-    border-radius: 6px;
-    padding: 8px 12px;
-    font-size: 11pt;
+    border-radius: 15px;
+    padding: 10px 18px;
+    font-size: 14pt;
     selection-background-color: {WII_LIGHT_BLUE};
 }}
 
@@ -139,71 +140,73 @@ QLineEdit:focus {{
 
 /* Списки */
 QListWidget {{
-    background-color: white;
+    background-color: {WII_WHITE};
     border: 2px solid {WII_GRAY};
-    border-radius: 8px;
-    padding: 4px;
-    font-size: 11pt;
+    border-radius: 20px;
+    padding: 8px;
+    font-size: 14pt;
     alternate-background-color: {WII_LIGHT_GRAY};
 }}
 
 QListWidget::item {{
-    background-color: white;
+    background-color: {WII_WHITE};
     border: 1px solid {WII_GRAY};
-    border-radius: 6px;
-    padding: 8px;
-    margin: 2px;
-    min-height: 40px;
+    border-radius: 15px;
+    padding: 12px;
+    margin: 4px;
+    min-height: 60px;
 }}
 
 QListWidget::item:selected {{
     background-color: {WII_BLUE};
     color: white;
     border-color: {WII_BLUE};
+    border-radius: 15px;
 }}
 
 QListWidget::item:hover {{
     background-color: {WII_LIGHT_BLUE};
     border-color: {WII_BLUE};
+    border-radius: 15px;
 }}
 
 /* Группы */
 QGroupBox {{
-    background-color: white;
+    background-color: {WII_WHITE};
     border: 2px solid {WII_GRAY};
-    border-radius: 8px;
-    padding: 12px;
-    font-size: 12pt;
+    border-radius: 20px;
+    padding: 20px;
+    font-size: 14pt;
     font-weight: bold;
     color: #2C3E50;
-    margin-top: 12px;
+    margin-top: 20px;
 }}
 
 QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    padding: 4px 8px;
+    padding: 6px 12px;
     background-color: {WII_BLUE};
     color: white;
-    border-radius: 4px;
-    margin-left: 8px;
+    border-radius: 12px;
+    margin-left: 14px;
 }}
 
 /* Прогресс-бар */
 QProgressBar {{
     background-color: {WII_GRAY};
     border: 2px solid {WII_BLUE};
-    border-radius: 6px;
+    border-radius: 15px;
     text-align: center;
-    font-size: 11pt;
+    font-size: 14pt;
     font-weight: bold;
     color: #2C3E50;
-    min-height: 24px;
+    min-height: 32px;
 }}
 
 QProgressBar::chunk {{
     background-color: {WII_GREEN};
-    border-radius: 4px;
+    border-radius: 15px;
 }}
 
 /* Текстовые области */
@@ -291,24 +294,25 @@ QMenu::item:selected {{
 QLabel[headerTitle="true"] {{
     background-color: {WII_BLUE};
     color: white;
-    border-radius: 12px;
-    padding: 16px;
-    font-size: 20pt;
+    border-radius: 30px;
+    padding: 24px;
+    font-size: 28pt;
     font-weight: bold;
-    min-height: 60px;
+    min-height: 80px;
 }}
 
 /* Карточки игр */
 QWidget[gameCard="true"] {{
-    background-color: white;
+    background-color: {WII_WHITE};
     border: 2px solid {WII_GRAY};
-    border-radius: 12px;
-    padding: 16px;
+    border-radius: 25px;
+    padding: 24px;
 }}
 
 QWidget[gameCard="true"]:hover {{
     border-color: {WII_BLUE};
     background-color: {WII_LIGHT_GRAY};
+    border-radius: 25px;
 }}
 """
 
@@ -355,7 +359,7 @@ class GameCard(QWidget):
         super().__init__(parent)
         self.game = game
         self.setProperty("gameCard", True)
-        self.setFixedSize(460, 700)
+        self.setFixedSize(560, 800)
         self.setup_ui()
         self.load_game_details()
         
@@ -1042,9 +1046,10 @@ class WiiUnifiedManager(QMainWindow):
             QPushButton {{
                 background-color: {WII_RED};
                 color: white;
-                padding: 6px 12px;
-                border-radius: 4px;
+                padding: 8px 20px;
+                border-radius: 20px;
                 font-weight: bold;
+                font-size: 14pt;
             }}
             QPushButton:hover {{
                 background-color: #c82333;
@@ -1256,9 +1261,9 @@ class WiiUnifiedManager(QMainWindow):
         self.current_download_label = QLabel("Нет активных загрузок")
         self.current_download_label.setStyleSheet(f"""
             QLabel {{
-                font-size: 11pt;
+                font-size: 14pt;
                 color: {WII_DARK_GRAY};
-                padding: 4px;
+                padding: 6px;
             }}
         """)
         layout.addWidget(self.current_download_label)
@@ -1269,16 +1274,16 @@ class WiiUnifiedManager(QMainWindow):
         self.download_progress.setStyleSheet(f"""
             QProgressBar {{
                 border: 2px solid {WII_BLUE};
-                border-radius: 6px;
+                border-radius: 15px;
                 text-align: center;
-                font-size: 11pt;
+                font-size: 14pt;
                 font-weight: bold;
-                min-height: 24px;
+                min-height: 32px;
                 background-color: {WII_LIGHT_GRAY};
             }}
             QProgressBar::chunk {{
                 background-color: {WII_GREEN};
-                border-radius: 4px;
+                border-radius: 15px;
             }}
         """)
         layout.addWidget(self.download_progress)
@@ -1288,11 +1293,11 @@ class WiiUnifiedManager(QMainWindow):
         self.download_info.setVisible(False)
         self.download_info.setStyleSheet(f"""
             QLabel {{
-                font-size: 10pt;
+                font-size: 12pt;
                 color: {WII_DARK_GRAY};
-                padding: 4px;
+                padding: 6px;
                 background-color: {WII_LIGHT_GRAY};
-                border-radius: 4px;
+                border-radius: 12px;
             }}
         """)
         layout.addWidget(self.download_info)
@@ -1922,109 +1927,48 @@ class WiiUnifiedManager(QMainWindow):
         self.download_queue.is_downloading = True
         self.download_queue.current_download = item
         
-        # Создаем диалог прогресса загрузки
-        self.download_dialog = self.create_download_dialog(item)
-        
+        # Отображаем панель загрузки
+        self.download_panel.setVisible(True)
+        self.current_download_label.setText(f"Загрузка: {item.game.title}")
+        self.download_progress.setVisible(True)
+        self.download_progress.setValue(0)
+        self.download_info.setVisible(True)
+        self.download_info.setText("Подготовка...")
+        self.cancel_download_btn.setVisible(True)
+
         # Запускаем загрузку в отдельном потоке
         self.download_thread = DownloadThread(item.download_url, item.game.title)
         self.download_thread.progress_updated.connect(self.on_download_progress)
         self.download_thread.download_finished.connect(self.on_download_finished)
         self.download_thread.start()
         
-        self.download_dialog.show()
-        
-    def create_download_dialog(self, item: DownloadQueueItem) -> QDialog:
-        """Создание диалога прогресса загрузки"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Загрузка: {item.game.title}")
-        dialog.setModal(True)
-        dialog.setFixedSize(500, 250)
-        
-        layout = QVBoxLayout(dialog)
-        layout.setSpacing(16)
-        
-        # Заголовок
-        title_label = QLabel(f"Загрузка игры: {item.game.title}")
-        title_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 14pt;
-                font-weight: bold;
-                color: {WII_BLUE};
-                padding: 8px;
-                background-color: {WII_LIGHT_GRAY};
-                border-radius: 6px;
-            }}
-        """)
-        layout.addWidget(title_label)
-        
-        # Прогресс-бар
-        self.download_progress_bar = QProgressBar()
-        self.download_progress_bar.setRange(0, 100)
-        self.download_progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                border: 2px solid {WII_BLUE};
-                border-radius: 6px;
-                text-align: center;
-                font-size: 12pt;
-                font-weight: bold;
-                min-height: 32px;
-                background-color: {WII_LIGHT_GRAY};
-            }}
-            QProgressBar::chunk {{
-                background-color: {WII_GREEN};
-                border-radius: 4px;
-            }}
-        """)
-        layout.addWidget(self.download_progress_bar)
-        
-        # Детальная информация
-        self.download_info_label = QLabel("Подготовка к загрузке...")
-        self.download_info_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 11pt;
-                color: {WII_DARK_GRAY};
-                padding: 8px;
-                background-color: {WII_LIGHT_GRAY};
-                border-radius: 6px;
-            }}
-        """)
-        layout.addWidget(self.download_info_label)
-        
-        # Кнопки
-        buttons_layout = QHBoxLayout()
-        
-        self.download_cancel_btn = QPushButton("Отменить")
-        self.download_cancel_btn.clicked.connect(self.cancel_download)
-        
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.download_cancel_btn)
-        
-        layout.addLayout(buttons_layout)
-        
-        return dialog
         
     def on_download_progress(self, downloaded: int, total: int, speed: float, eta: str, size_str: str):
         """Обновление прогресса загрузки"""
         if total > 0:
             progress = int((downloaded / total) * 100)
-            self.download_progress_bar.setValue(progress)
-            
+            self.download_progress.setValue(progress)
+
             info_text = f"Размер: {size_str}\nСкорость: {speed:.1f} МБ/с\nОсталось: {eta}"
-            self.download_info_label.setText(info_text)
+            self.download_info.setText(info_text)
         
     def on_download_finished(self, success: bool, message: str):
         """Завершение загрузки"""
         self.download_queue.is_downloading = False
         self.download_queue.current_download = None
         
-        if hasattr(self, 'download_dialog'):
-            self.download_dialog.close()
-            
         if success:
             QMessageBox.information(self, "Загрузка завершена", message)
             self.refresh_downloaded_games()
         else:
             QMessageBox.warning(self, "Ошибка загрузки", message)
+
+        self.current_download_label.setText("Нет активных загрузок")
+        self.download_progress.setVisible(False)
+        self.download_info.setVisible(False)
+        self.cancel_download_btn.setVisible(False)
+        self.download_panel.setVisible(False)
+        self.update_download_indicator()
             
         # Ждем 10 секунд перед следующей загрузкой
         QTimer.singleShot(10000, self.process_download_queue)
@@ -2033,12 +1977,15 @@ class WiiUnifiedManager(QMainWindow):
         """Отмена загрузки"""
         if hasattr(self, 'download_thread') and self.download_thread:
             self.download_thread.stop()
-            
-        if hasattr(self, 'download_dialog'):
-            self.download_dialog.close()
-            
+
         self.download_queue.is_downloading = False
         self.download_queue.current_download = None
+        self.current_download_label.setText("Загрузка отменена")
+        self.download_progress.setVisible(False)
+        self.download_info.setVisible(False)
+        self.cancel_download_btn.setVisible(False)
+        QTimer.singleShot(1000, lambda: self.download_panel.setVisible(False))
+        self.update_download_indicator()
         
     def update_download_indicator(self):
         """Обновление индикатора загрузок"""
